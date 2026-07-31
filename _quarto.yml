@@ -1,0 +1,54 @@
+project:
+  type: book
+
+book:
+  title: "ISO/IEC Standards Notes"
+  author: "Kittipos Sirivongrungson"
+  date: today
+  repo-url: https://github.com/Lightbridge-KS/iso-iec-notes
+  site-url: https://iso-iec-notes-lightbridge.netlify.app
+  chapters:
+    - index.qmd
+    # - part: Overview
+    #   chapters:
+    #     - text: Standards Landscape
+    #       href: "contents/overview/landscape.qmd"
+    #     - text: Vocabulary
+    #       href: "contents/overview/vocabulary.qmd"
+    - part: ISO/IEC 29110
+      chapters:
+        - text: Work Product Evidence CheatSheet
+          href: "contents/29110/iso29110-work-product-cheatsheet.qmd"
+        - text: Software Product vs Software vs Software Component
+          href: "contents/29110/iso29110-wp-software-stuff.qmd"
+    # - part: ISO 13485
+    #   chapters:
+    #     - text: What 13485 Is
+    #       href: "contents/13485/intro.qmd"
+    #     - text: QMS Structure
+    #       href: "contents/13485/qms-structure.qmd"
+    #     - text: Design & Development Controls
+    #       href: "contents/13485/design-controls.qmd"
+    # - part: IEC 62304
+    #   chapters:
+    #     - text: What 62304 Is
+    #       href: "contents/62304/intro.qmd"
+    #     - text: Software Safety Classes
+    #       href: "contents/62304/safety-classes.qmd"
+    #     - text: Lifecycle Processes
+    #       href: "contents/62304/processes.qmd"
+    # - part: Applying
+    #   chapters:
+    #     - text: Crosswalk & Practice Notes
+    #       href: "contents/applying/crosswalk.qmd"
+
+format:
+  html:
+    theme:
+      light:
+        - cosmo
+      dark:
+        - darkly
+    toc-depth: 4
+
+freeze: auto

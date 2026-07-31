@@ -1,0 +1,100 @@
+---
+title: "Software Product vs Software vs Software Component"
+---
+
+
+::: {.callout-note appearance="default" collapse="false"}
+Q: What are the difference between WP. 14 “Software”, WP. 15 “Software Component”, and WP. 17 “Software Product”? 
+:::
+
+
+Three different **levels of aggregation**, each with its own test gate and its own baseline. The cleanest way to see it is as nested containment:
+
+```
+┌─ WP.17 SOFTWARE PRODUCT ──────────────────────────────────┐
+│  the deliverable bundle — code AND all documentation      │
+│                                                           │
+│   ├── Requirements specification (WP.13)                  │
+│   ├── Software design (WP.16)                             │
+│   ├── Traceability record (WP.21)                         │
+│   ├── Test cases and test procedures (WP.19)              │
+│   ├── Test report (WP.20)                                 │
+│   ├── Product operation guideline (WP.08)                 │
+│   ├── Software user documentation (WP.18)                 │
+│   ├── Maintenance documentation (WP.06)                   │
+│   │                                                       │
+│   ├── ┌─ WP.14 SOFTWARE ─────────────────────────────┐    │
+│   │   │  source + executable, integrated             │    │
+│   │   │                                              │    │
+│   │   │   ┌─ WP.15 SOFTWARE COMPONENTS ──────────┐   │    │
+│   │   │   │  a set of related code units         │   │    │
+│   │   │   │   [unit] [unit] [unit] …             │   │    │
+│   │   │   └──────────────────────────────────────┘   │    │
+│   │   └──────────────────────────────────────────────┘    │
+└───────────────────────────────────────────────────────────┘
+```
+
+So: **WP.15 ⊂ WP.14 ⊂ WP.17**, and WP.17 additionally wraps eight documentation WPs around the code.
+
+## The distinguishing axis is which test gate each one passes
+
+| | WP.15 Components | WP.14 Software | WP.17 Software Product |
+|---|---|---|---|
+| **Definition** | A set of related code units | Source + executable code for the customer, formed from integrated components | Uniquely identified, consistent set of 10 named work products |
+| **Produced in** | SI.04 Construction | SI.05 Integration and tests | SI.02 → SI.06, accumulating |
+| **Gate passed** | **Unit** tests | **Integration** tests | Customer acceptance |
+| **States** | unit tested, corrected, baselined | tested, corrected, baselined | **delivered, accepted** |
+| **Role** | Programmer | Programmer | Technical Leader → PM |
+
+The states are the giveaway. WP.14 and WP.15 have *engineering* states — they get tested, fixed, frozen. WP.17 has *transactional* states: `delivered` and `accepted`. It's the only one of the three that's defined by a handoff rather than by a build step. That's because WP.17 is what SI.06 assembles and hands to the Project Manager, who delivers it in PM.04 and gets the Acceptance Record (WP.01) signed against it.
+
+## The part most people miss: WP.17 is not assembled at the end
+
+It's tempting to read "Software Product" as a final zip file. It isn't — it grows across the whole SI process, and the standard fills it in three passes that correspond to the three baselines named in your version control strategy:
+
+```
+SI.02  ──► SPECIFICATION BASELINE
+           Software product += requirements spec [approved]
+                            += software user doc [preliminary, verified]
+                            += traceability record [initiated]
+
+SI.03  ──► DESIGN BASELINE
+           Software product += software design [approved]
+                            += test cases & procedures [verified]
+                            += traceability record [updated]
+
+SI.05  ──► PRODUCT BASELINE
+           Software product += software [verified]
+                            += test report [published]
+                            += product operation guideline [verified]
+                            += software user documentation [verified]
+
+SI.06  ──► ASSEMBLY
+           Software product += maintenance documentation [verified]
+           → assembled per delivery instructions → PM.04 → WP.01 signed
+```
+
+Read that way, WP.17 is better understood as a **versioned envelope that opens at SI.02 and seals at SI.06**, with WP.14 dropped in only at the SI.05 stage. It's a configuration-management concept, not an artefact you author.
+
+## In GitHub terms
+
+```
+WP.15 Components  →  merged PRs on main; unit suite green
+                     (src/ingest/, src/infer/ — the packages)
+
+WP.14 Software    →  the CI build from an integration-green commit:
+                     wheel / binary / container image / APK
+
+WP.17 Product     →  the GitHub Release: annotated tag + attached
+                     build artefacts + docs/ tree at that same tag
+```
+
+The tag is what makes WP.17 work as a concept — it's the mechanism that guarantees "uniquely identified and **consistent**," i.e. that the requirements spec, design, traceability matrix, tests and binary you're shipping all correspond to the same state of the world. Shipping a binary built from `main` alongside docs from three weeks ago fails WP.17 even if every individual document exists.
+
+## Why the standard bothers with three levels
+
+Because each level answers a different auditor question, and traceability needs all three anchors:
+
+- *"Does this module do what its detailed design says?"* → WP.15, unit tests
+- *"Do the modules work together and meet the requirements?"* → WP.14, integration tests
+- *"Is what we shipped the coherent, documented, accepted thing?"* → WP.17, acceptance
