@@ -4,6 +4,10 @@ _temp
 # Licensed standards material — single-user ISO licences, never publish
 references/
 
+# Node / Netlify
+node_modules/
+.netlify/
+
 # Quarto
 /.quarto/
 /.venv/
