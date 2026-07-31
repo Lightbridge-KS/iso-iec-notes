@@ -1,3 +1,9 @@
+# Temp
+_temp
+
+# Licensed standards material — single-user ISO licences, never publish
+references/
+
 # Quarto
 /.quarto/
 /.venv/

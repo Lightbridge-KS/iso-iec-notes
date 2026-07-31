@@ -1,0 +1,179 @@
+---
+title: "What ISO/IEC 29110 Is"
+---
+
+**Scope:** The ISO/IEC 29110 series as a whole — what problem it solves, the one idea it is built on, how the parts fit together, and how to decode a part number like `29110-5-1-2`.
+
+**Status:** Working notes. Paraphrased for orientation only — the standards themselves are authoritative.
+
+---
+
+## 1. The Problem
+
+International lifecycle standards are written for organisations that can afford them. ISO/IEC/IEEE 12207 (software lifecycle processes) and ISO/IEC/IEEE 15288 (system lifecycle processes) each define dozens of processes with hundreds of outcomes. A five-person team cannot implement them, cannot afford to be audited against them, and — crucially — cannot be *recognised* for the quality work it already does.
+
+The consequence named in the standard's own introduction is economic, not technical: without a means of recognition, very small entities get excluded from procurement. Big customers ask "which standard are you certified to?" and a good three-person team has no answer.
+
+29110 exists to give that team an answer it can actually reach.
+
+::: {.callout-important}
+## VSE — the definition that decides whether this applies to you
+
+A **Very Small Entity** is an enterprise, organisation (including a government agency or non-profit), **department, or project** having **up to 25 people**.
+
+The words *department* and *project* do the heavy lifting. A 6-person AI unit inside a 900-person hospital is a VSE. A single project staffed by 8 people inside a large company is a VSE. Headcount is measured at the scope you choose to apply the profile to — not at the legal entity.
+:::
+
+---
+
+## 2. The One Idea: A Profile
+
+29110 authors almost no new engineering content. It **selects** — that is the whole move.
+
+A **profile** is a subset of appropriate standards' processes and their outcomes, activities and tasks, combined to accomplish a particular function.
+
+```{mermaid}
+flowchart LR
+    A["ISO/IEC/IEEE 12207<br/>software lifecycle processes"] --> P
+    B["ISO/IEC/IEEE 15288<br/>system lifecycle processes"] --> P
+    C["ISO/IEC/IEEE 15289<br/>content of lifecycle<br/>information items"] --> P
+    P{{"select a subset"}} --> Q["PROFILE<br/>e.g. software Basic:<br/>2 processes, 10 activities,<br/>23 work products"]
+```
+
+Two consequences follow, and both matter:
+
+1. **Conforming to a 29110 profile is conforming to a defined slice of 12207/15289.** It is not a parallel or lesser standard — it is a legitimate, bounded entry point into the same family.
+2. **Nothing in 29110 forbids doing more.** The profile is a floor, never a ceiling. Processes a VSE finds useful and that the profile does not mention are explicitly not discouraged.
+
+15289 is the quiet one in that diagram, and it explains a lot about the shape of the work-product list: it is the standard that says *what content a lifecycle document must contain*. That is why 29110 talks incessantly about work products and their states rather than about code.
+
+---
+
+## 3. The Series Map
+
+The series is a set of document families, not a linear list. Each family can grow new members without disturbing the others.
+
+```{mermaid}
+flowchart TB
+    A["<b>29110-1-1</b> Overview &nbsp;·&nbsp; <b>29110-1-2</b> Vocabulary"]
+    subgraph PR["29110 Profiles — <i>where the requirements live</i>"]
+        B["<b>29110-2</b> Framework and taxonomy"]
+        B ~~~ C["<b>29110-4-m</b> Specifications — generic profile groups"]
+        C ~~~ D["<b>29110-6-m</b> Requirements — specific profile groups"]
+        D ~~~ E["<b>29110-3</b> Assessment and certification"]
+    end
+    subgraph GU["29110 Guidelines — <i>how to actually do it</i>"]
+        F["<b>29110-5-m-n</b> Management, engineering and<br/>service delivery guidelines — generic"]
+        F ~~~ G["<b>29110-7-m</b> Specific profile guidelines"]
+    end
+    A --> B
+    E --> F
+```
+
+Read that map as three bands:
+
+| Band | Question it answers | Normative weight |
+|---|---|---|
+| Overview / Vocabulary (1-1, 1-2) | What is all this, and what do the words mean? | Orientation |
+| Profiles (2, 4-m, 6-m, 3) | What exactly must be true to conform, and how is that audited? | **The requirements live here** |
+| Guidelines (5-m-n, 7-m) | How do I actually do it, task by task? | Guidance |
+
+::: {.callout-note}
+## The 5-part → 7-part shift
+
+Older material — including most papers, slide decks and deployment packages you will find online — describes 29110 as a **five-part** series (1, 2, 3, 4, 5). The current shape adds two families for *specific* profile groups: **`-6-m`** (requirements) and **`-7-m`** (guidelines), and splits Part 1 into Overview (`1-1`) and Vocabulary (`1-2`).
+
+Nothing about the Basic profile changed because of this. But if a source shows a 5-box diagram, you are reading pre-revision material — check its other claims too.
+:::
+
+---
+
+## 4. Decoding a Part Number
+
+`29110-5-1-2` is not an arbitrary label. Every digit is a coordinate.
+
+```
+ISO/IEC 29110 - 5 - 1 - 2
+                │   │   │
+                │   │   └── profile          2 = Basic
+                │   │                        (1 = Entry, 3 = Intermediate, 4 = Advanced)
+                │   │
+                │   └────── profile group    1 = Generic, software engineering
+                │                            (6 = Generic, systems engineering)
+                │
+                └────────── part family      5 = management & engineering guidelines
+                                             (4 = profile specifications, 3 = assessment,
+                                              2 = framework, 1 = overview & vocabulary)
+```
+
+So the two documents that matter most for a software VSE doing one project:
+
+- **`29110-4-1`** — the *specification* for the Generic profile group, software engineering. This is what you **conform to**.
+- **`29110-5-1-2`** — the *guide* for the Basic profile. This is what you **read and follow**.
+
+They pair up: the guide tells you what to do; the specification states which of it is mandatory. See [Conformance, Assessment and Certification](conformance.qmd).
+
+---
+
+## 5. Which Parts You Actually Read
+
+The series is deliberately targeted by audience. Most of it is not addressed to you.
+
+| Part | Title | Audience | Do you read it? |
+|---|---|---|---|
+| 1-1 / 1-2 | Overview / Vocabulary | VSEs, customers, assessors, tool & methodology vendors, standards producers | Skim once |
+| 2 | Framework and taxonomy | Profile producers, tool & methodology vendors | **No — explicitly not intended for VSEs** |
+| 3 | Assessment and certification | VSEs, customers, assessors, accreditation bodies | Before an audit |
+| 4-m | Profile specifications | VSEs, customers, standards producers, vendors | **Yes — this is the conformance target** |
+| 5-m-n | Management, engineering & service delivery guidelines | VSEs and their customers | **Yes — this is the working document** |
+| 6-m / 7-m | Specific profile requirements / guidelines | VSEs outside the generic profile group | Only if generic does not fit |
+
+Part 2 being off-limits is a genuine relief, not a snub: it is the meta-standard describing how profiles are *constructed*. You consume profiles; you do not build them.
+
+::: {.callout-tip}
+## Free vs. paid
+
+Historically the Overview, assessment guidance and the management-and-engineering guides were published as **Technical Reports (TR)** and made freely available by ISO, while the framework, profile specifications and certification schemes were **International Standards (IS)** you had to buy. That asymmetry was the point — a VSE could read the whole working guide for nothing.
+
+**This has been changing.** ISO/IEC 29110-5-1-2:2025 is a **first-edition International Standard** that replaces ISO/IEC TR 29110-5-1-2:2011 — the guide is no longer a TR. Check current availability on the ISO catalogue before assuming any given part is free.
+:::
+
+---
+
+## 6. What 29110 Is Not
+
+Four misreadings, each costly in a different way.
+
+**Not a maturity model.** There are no levels, no "29110 Level 3". The Entry → Basic → Intermediate → Advanced roadmap is a sequence of *scopes*, not a capability ladder — see [Profile Groups and Profiles](profile-groups.qmd). Process *capability* assessment exists, but it is a separate concept living in Part 3 and the ISO/IEC 330xx family.
+
+**Not a quality management system.** 29110 governs how a *project* runs. It says nothing about management review, resource competence at organisational level, supplier control, or CAPA as a standing system. That is ISO 13485 territory for medical devices, ISO 9001 generally.
+
+**Not a safety standard.** This is the boundary that matters most in a medical-device context:
+
+> The **generic profile group** applies to VSEs that do **not** develop safety-critical systems or software products.
+
+Safety-critical software is defined in the same document as software whose failure or malfunction can result in death or serious injury, loss of or severe damage to equipment or property, or damage to the natural environment. If that is your product, the generic profiles are out of scope by construction — you need IEC 62304, and ISO 13485 for the QMS around it. 29110 can still discipline the project; it cannot discharge the safety obligation.
+
+```{mermaid}
+flowchart LR
+    Q{"Safety-critical<br/>software?"}
+    Q -->|no| G["Generic profile group<br/>29110-4-1 / 5-1-n"]
+    Q -->|yes| S["IEC 62304 + ISO 13485<br/>29110 as project discipline only"]
+```
+
+**Not a methodology.** 29110 is explicitly intended to be used with any lifecycle — waterfall, iterative, incremental, evolutionary or agile — and task descriptions deliberately impose no technique or method. The standard says *what* must be true; choosing *how* is left entirely to the VSE. A task saying "verify the requirements specification" is satisfied by a review meeting, a checklist, or a pull-request approval, as you decide and declare.
+
+---
+
+## 7. Reading Order for These Notes
+
+```{mermaid}
+flowchart TB
+    A["<b>What 29110 Is</b> — you are here"] --> B["<b>Profile Groups and Profiles</b><br/>which profile applies to you"]
+    B --> C["<b>The Two Processes: PM and SI</b><br/>the 10 activities and 7 roles"]
+    C --> D["<b>Work Product Evidence CheatSheet</b><br/>the 23 work products, one by one"]
+    D --> E["<b>Deployment Packages</b><br/>free implementation kits"]
+    E --> F["<b>Conformance and Certification</b><br/>what an auditor actually checks"]
+```
+
+The single most important idea to carry forward, and the one that survives every edition change: **29110 cares about the state a work product reached, not about the file existing.**

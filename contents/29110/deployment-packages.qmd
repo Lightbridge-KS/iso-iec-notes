@@ -1,0 +1,177 @@
+---
+title: "Deployment Packages"
+---
+
+**Scope:** Deployment Packages (DPs) — the free implementation kits that sit between the standard's "what" and your project's "how", what is inside one, which ones exist for the Basic profile, and the edition traps that come with using them.
+
+**Status:** Working notes. Paraphrased for orientation only.
+
+---
+
+## 1. What a DP Is
+
+A **deployment package** is a set of artefacts developed to facilitate the implementation of a set of practices, of the selected framework, in a VSE.
+
+The point is decomposition. The Basic profile is an all-or-nothing conformance target, but it is not an all-or-nothing *adoption* target. A DP is sized so that a VSE can implement its content **without implementing the complete framework at the same time**.
+
+```{mermaid}
+flowchart LR
+    S["<b>ISO/IEC 29110-5-1-2</b><br/>the guide<br/><i>what must be true</i>"]
+    D["<b>Deployment package</b><br/>templates, examples,<br/>checklists, tools<br/><i>one topic, end to end</i>"]
+    P["<b>Your project</b><br/>a filled-in template<br/>that is now evidence"]
+    S -->|"decomposed by topic"| D -->|"instantiated"| P
+    D -.->|"explicit mapping back"| S
+```
+
+Two boundaries the standard draws itself, both worth respecting:
+
+- **A DP is not a complete process reference model.** It cannot be your only source. Conformance is judged against `29110-4-1`, never against a DP.
+- **DPs do not preclude other guidance.** If your organisation already has a better requirements template, use it. The DP is scaffolding, not a mandate.
+
+::: {.callout-tip}
+## Why they matter more than they look
+
+A DP carries an **explicit mapping back to 29110 and to other standards** (12207, ISO 9001, and so on). That mapping is the load-bearing part: by deploying a package, a VSE can see the concrete steps that demonstrate coverage of a specific slice of the standard.
+
+Translated: a DP is a pre-built audit argument for one topic. That is worth far more than its templates.
+:::
+
+---
+
+## 2. What Is Inside One
+
+Every DP follows the same table of contents, in this order:
+
+```
+Technical description
+  ├── Purpose of this document
+  └── Why this topic is important?
+Definitions
+Relationships with ISO/IEC 29110          ← the mapping
+Overview of processes, activities, tasks, roles and products
+Description of processes, activities, tasks, steps, roles and products
+  ├── Role description
+  ├── Product description
+  └── Artefact description
+Template(s)
+Example(s)
+Checklist(s)
+Tool(s)
+References to other standards and models  (e.g. ISO 9001, ISO/IEC/IEEE 12207)
+References
+Evaluation form
+```
+
+Note **steps** in the description section — a level of granularity *below* the task. The standard deliberately stops at the task and refuses to prescribe technique; the DP is where somebody finally tells you how to actually do it. That is the whole reason DPs exist.
+
+The parts that repay attention, ranked:
+
+| Section | Why it earns its place |
+|---|---|
+| **Relationships with 29110** | Your coverage argument, pre-written |
+| **Checklist(s)** | Directly reusable as a verification-record checklist (WP.23) |
+| **Template(s)** | Fastest path to a conformant document, but the most edition-sensitive |
+| **Example(s)** | Calibrates *how much* detail is expected — the hardest thing to infer from the standard |
+| **Evaluation form** | Feedback to the DP authors; ignore unless you are contributing |
+
+---
+
+## 3. The Packages for the Software Basic Profile
+
+Nine, available at no cost:
+
+| # | Deployment package | Covers roughly |
+|---|---|---|
+| a | **Requirements analysis** | SI.02 · WP.13 Requirements specification |
+| b | **Architecture and detailed design** | SI.03 · WP.16 Software design |
+| c | **Construction and unit testing** | SI.04 · WP.15 Software components |
+| d | **Integration and test** | SI.05 · WP.14 Software, WP.20 Test report |
+| e | **Verification and validation** | WP.22 / WP.23 — cuts across both processes |
+| f | **Version control** | The version control strategy in WP.10 · WP.11, WP.12 |
+| g | **Project management** | PM.01–PM.04 · WP.10 Project plan |
+| h | **Product delivery** | SI.06 + PM.04 · WP.17, WP.01 |
+| i | **Self-assessment** | Gap analysis before an audit — see [Conformance](conformance.qmd) |
+
+Map that against the process chapter and the shape is obvious: **one DP per SI activity, one for PM as a whole, plus three cross-cutting ones** (verification and validation, version control, self-assessment).
+
+::: {.callout-note}
+## Where to get them
+
+Deployment packages are hosted publicly — historically on Professor Claude Y. Laporte's site at École de technologie supérieure (ÉTS) in Montréal, which has been the de-facto home of the 29110 support material and also carries case studies, papers and videos.
+
+That site has been reorganised more than once and old links rot. If a bookmarked URL 404s, search for the package name plus "deployment package 29110" rather than assuming it is gone. Annex E of the current Basic profile guide lists the packages authoritatively even when it does not resolve a URL for you.
+:::
+
+---
+
+## 4. Suggested Adoption Order
+
+The nine packages are not equally urgent. Ordered by how much risk each removes per hour spent:
+
+```{mermaid}
+flowchart TB
+    A["<b>1. Version control</b><br/>declares the mechanism that makes<br/>everything else count as evidence"]
+    B["<b>2. Project management</b><br/>WP.10 is the largest document<br/>and gates PM.01"]
+    C["<b>3. Requirements analysis</b><br/>requirement IDs anchor<br/>all downstream traceability"]
+    D["<b>4. Verification and validation</b><br/>the highest-frequency records<br/>in the whole profile"]
+    E["<b>5. The four engineering DPs</b><br/>design · construction ·<br/>integration · delivery"]
+    F["<b>6. Self-assessment</b><br/>run last, as a gap check"]
+    A --> B --> C --> D --> E --> F
+```
+
+The reasoning behind the first three:
+
+**Version control first** because the Project Plan's version control strategy is what licenses ordinary Git practice to serve as evidence elsewhere. Write it badly and you will manufacture parallel paperwork for the rest of the project.
+
+**Project management second** because WP.10 is the biggest single document in the profile and PM.01 cannot complete without it.
+
+**Requirements analysis third** because requirement IDs are load-bearing for the traceability record (WP.21), and renumbering them later breaks every downstream link. Choose the scheme before you write requirement number two.
+
+---
+
+## 5. Edition Traps
+
+DPs were authored against earlier editions of the guide and have not all been revised in step. Three concrete mismatches to expect:
+
+::: {.callout-warning}
+## Renamed work products
+
+The 2011 Technical Report used different names for two work products that sit at the very boundary of the process. The current guide renamed both:
+
+```
+2011 TR                     current guide
+─────────────────────────   ─────────────────────────
+Statement of Work    ────►  Agreement            (WP.02)
+Software Configuration ──►  Software product     (WP.17)
+```
+
+A DP that talks about the "Statement of Work" is not wrong, it is old. Map the term and move on — but do not use the old name in your own documents, because an auditor works from the current specification.
+:::
+
+**Activity numbering.** Older material writes `PM.1`, `SI.2`; the current guide writes `PM.01`, `SI.02`. Cosmetic, but it is a fast way to date a source.
+
+**Optional vs conditional tasks.** Earlier editions marked some tasks `*(optional)`, which never said *when* the option applied. The current edition replaces that with the **conditional task** — mandatory under specified conditions, optional under others, out of scope under others still. A DP still using the old marker will under-specify when you may skip something. When you skip a task, name the condition.
+
+**Series shape.** DPs and papers predating the revision describe a five-part series. The current shape is seven families — see [What ISO/IEC 29110 Is](intro.qmd).
+
+---
+
+## 6. Compressed
+
+```
+DP = one topic, decomposed to the STEP level, with the
+     29110 mapping pre-written and a template you can fill in.
+
+NOT a process reference model.  NOT a conformance target.
+Conformance is always to 29110-4-1.
+
+9 packages for software Basic:
+   one per SI activity · one for PM · three cross-cutting
+   (verification & validation, version control, self-assessment)
+
+Adopt in risk order:  version control → project management →
+                      requirements → V&V → engineering → self-assessment
+
+Always check the edition. "Statement of Work" and
+"Software Configuration" mean the material predates the rename.
+```

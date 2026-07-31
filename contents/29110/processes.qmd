@@ -1,0 +1,305 @@
+---
+title: "The Two Processes: PM and SI"
+---
+
+**Scope:** The engine of the Basic profile — two processes, ten activities, seven roles, and the naming scheme that lets you cite any single requirement precisely.
+
+**Status:** Working notes. Paraphrased for orientation only — the standard is authoritative for exact task wording.
+
+---
+
+## 1. The Whole Profile in One Picture
+
+The Basic profile has exactly two processes. Everything else — every task, every work product, every state — hangs off one of them.
+
+```{mermaid}
+flowchart TB
+    CUS(["Customer<br/><i>internal or external</i>"])
+
+    subgraph PM["<b>PM</b> — Project management process"]
+        PM01["PM.01 Project planning"] --> PM02["PM.02 Project plan execution"]
+        PM02 --> PM03["PM.03 Project assessment and control"]
+        PM03 --> PM04["PM.04 Project closure"]
+        PM03 -.->|"corrections,<br/>approved changes"| PM02
+    end
+
+    subgraph SI["<b>SI</b> — Software implementation process"]
+        SI01["SI.01 Software implementation initiation"] --> SI02["SI.02 Software requirements analysis"]
+        SI02 --> SI03["SI.03 Software architectural and detailed design"]
+        SI03 --> SI04["SI.04 Software construction"]
+        SI04 --> SI05["SI.05 Software integration and tests"]
+        SI05 --> SI06["SI.06 Software product assembly"]
+    end
+
+    MGT(["VSE management"])
+
+    CUS -->|"Agreement"| PM01
+    PM01 -->|"Project plan"| SI01
+    SI06 -->|"Software product"| PM04
+    PM04 -->|"Software product<br/>+ acceptance record"| CUS
+    PM03 <-.-> MGT
+```
+
+Read the loop plainly:
+
+- The **customer** hands over an **Agreement** and eventually receives a **Software product**. Those are the only two things crossing the boundary.
+- **PM** turns the Agreement into a Project Plan, then watches reality diverge from it and pulls it back.
+- **SI** is driven by the Project Plan and produces everything technical.
+- The two processes talk continuously — this is not a handoff.
+
+::: {.callout-note}
+## The customer can be you
+
+A customer is explicitly allowed to be internal: another project or department of the same organisation. For an internal R&D unit this is the unlock — you do not need an external contract to run the Basic profile. You need someone empowered to approve requirements and sign acceptance, and that person can sit two desks away.
+:::
+
+---
+
+## 2. Before You Start: Entry Conditions
+
+The profile assumes five things are already true. These are not tasks inside the process — they are the doorway.
+
+| # | Condition |
+|---|---|
+| 1 | The **project agreement** is documented, approved by VSE management, and **baselined before the project starts** |
+| 2 | A **feasibility study** was performed before the project start |
+| 3 | The **project team, including the project manager, is assigned and trained** |
+| 4 | The **development cycle** is documented — waterfall, iterative, incremental, evolutionary or agile |
+| 5 | Goods, services and infrastructure to start the project are available |
+
+::: {.callout-warning}
+## Condition 4 is the one people skip
+
+You must *declare* your lifecycle. The standard is lifecycle-agnostic, and that agnosticism has a price: the burden of naming it moves to you. "We do agile" is not a documented development cycle. What the sprint boundary means for a baseline, when verification happens relative to a merge, what "approved" means for a work product in your flow — that is the declaration. Everything downstream is judged against it.
+
+Condition 3's word **trained** is the other quiet one — competence in the roles below is expected to be evidenced, not assumed.
+:::
+
+---
+
+## 3. The Naming Scheme
+
+You cannot discuss 29110 precisely without this. Four levels of granularity, each with its own identifier shape:
+
+```
+PROCESS        PM                    Project management
+  │
+  ├─ OUTCOME   PM.O1 … PM.O7         what must be TRUE when the process works
+  │                                  (this is what maps back to 12207)
+  │
+  ├─ ACTIVITY  PM.01 … PM.04         a set of cohesive tasks
+  │
+  └─ TASK      PM.03.02              a required, recommended or permissible action
+                                     ("Establish actions to correct deviations…")
+```
+
+The pieces:
+
+- An **outcome** (`PM.O1`, note the letter **O**) is an observable result of the process working. Outcomes are the bridge to ISO/IEC/IEEE 12207 and the thing a process-capability assessment scores.
+- An **activity** (`PM.01`, digits) is a group of cohesive tasks. Each activity declares which outcomes it contributes to — e.g. *PM.01 Project planning contributes to PM.O1, PM.O5, PM.O6, PM.O7*.
+- A **task** (`PM.03.02`) is the atom. Every task in the guide is a row in a four-column table:
+
+  | Roles | Task | Input work products | Output work products |
+  |---|---|---|---|
+
+  and the work products carry their required **state** in brackets: `Project plan [approved]` → `Progress status record [evaluated]`.
+
+That table shape is the single most useful thing in the whole guide. It tells you *who* does it, *what goes in*, *what comes out*, and — via the bracketed states — *what must already have happened*.
+
+::: {.callout-tip}
+## Conditional tasks
+
+The current edition introduces the **conditional task**: a task that is mandatory under some specified conditions, optional under others, and out of scope under others still. It replaces the older `*(optional)` marker, which was ambiguous about *when* the option applied.
+
+Practical effect: when you skip a task, you must be able to name the condition that made it inapplicable. "We didn't need it" is not the same statement as "no change request was raised, so PM.03.04 did not apply."
+:::
+
+---
+
+## 4. Project Management — PM.01 to PM.04
+
+**Purpose:** achieve the project's time, quality and cost objectives by establishing and executing the tasks of the software implementation project systematically — plus the administrative work of storing, handling, protecting and delivering work products and configuration items.
+
+That second clause is easy to miss and is half the process. Configuration management is not a separate process in the Basic profile; it lives inside PM.
+
+```{mermaid}
+flowchart LR
+    A(["Agreement"]) --> PM01["<b>PM.01</b><br/>Project planning"]
+    PM01 --> PP(["Project plan"])
+    PP --> PM02["<b>PM.02</b><br/>Project plan execution"]
+    PM02 <--> PM03["<b>PM.03</b><br/>Project assessment<br/>and control"]
+    PM03 --> CR(["Correction register<br/>Change request"])
+    CR --> PM02
+    PM02 --> PSR(["Progress status record"])
+    PM03 --> PM04["<b>PM.04</b><br/>Project closure"]
+    PM04 --> AR(["Acceptance record<br/>Software product delivered"])
+```
+
+| Activity | What it does | Signature outputs |
+|---|---|---|
+| **PM.01** Project planning | Documents the planning detail needed to manage the project: lifecycle and task dependencies, the **quality assurance strategy** (which verifications, validations and reviews happen), roles and responsibilities, resources and **training needs**, effort/cost/schedule estimates, risks, the **version control strategy**, and establishment of the **project repository** | Project plan, Validation record, Project repository |
+| **PM.02** Project plan execution | Implements the plan: keeps the progress status record current, evaluates change requests for cost/schedule/technical impact, holds reviews with work team and customer, and **backs up the repository — and recovers it if necessary** | Progress status record, Meeting record, Project repository backup |
+| **PM.03** Project assessment and control | Evaluates actual performance against documented commitments — tasks, objectives, resources, cost, schedule, **and risk** — then establishes corrective actions and tracks them to closure | Correction register, Change request, Meeting record |
+| **PM.04** Project closure | Delivers the work products per the **delivery instructions** and obtains the customer's signature on the acceptance record | Acceptance record, Software product `[delivered]` |
+
+### PM process outcomes
+
+Seven outcomes, worth reading once in full because they are what conformance is ultimately about:
+
+| | Outcome |
+|---|---|
+| **PM.O1** | Project plan developed per the agreement, reviewed and accepted by the customer; tasks and resources sized and estimated |
+| **PM.O2** | Progress monitored against the plan and recorded; plan changes customer-approved; corrections taken when targets are missed; closure achieves a documented acceptance record |
+| **PM.O3** | Change requests received and analysed; requirement changes evaluated for cost, schedule and technical impact; those touching plan/requirements/agreement are customer-approved |
+| **PM.O4** | Review meetings held with work team and customer; agreements registered and tracked |
+| **PM.O5** | Risks identified as they develop and throughout the project |
+| **PM.O6** | Version control strategy developed; items identified, defined and baselined; modifications and releases controlled and made available; storage, handling and delivery controlled |
+| **PM.O7** | Software quality assurance performed — work products and processes comply with plan and requirements |
+
+::: {.callout-important}
+## PM.O7 has no dedicated activity
+
+Quality assurance is implemented **through the verification, validation and review tasks scattered across both processes**. There is no QA department, no QA activity, no QA work product. If you look for a box labelled QA you will not find one — which is exactly why teams fail this outcome. The evidence for PM.O7 is the accumulated Verification Records and Validation Records from everywhere else.
+:::
+
+---
+
+## 5. Software Implementation — SI.01 to SI.06
+
+**Purpose:** systematic performance of analysis, design, construction, integration, testing and assembly of work products for a new or modified software product, according to the specified requirements.
+
+```{mermaid}
+flowchart TB
+    SI01["<b>SI.01</b> Software implementation initiation<br/><i>work team commits to the plan</i>"]
+    SI02["<b>SI.02</b> Software requirements analysis<br/><i>→ Requirements specification</i>"]
+    SI03["<b>SI.03</b> Software architectural and detailed design<br/><i>→ Software design, Test cases</i>"]
+    SI04["<b>SI.04</b> Software construction<br/><i>→ Software components, unit tested</i>"]
+    SI05["<b>SI.05</b> Software integration and tests<br/><i>→ Software, Test report, guides</i>"]
+    SI06["<b>SI.06</b> Software product assembly<br/><i>→ Software product to the PJM</i>"]
+    SI01 --> SI02 --> SI03 --> SI04 --> SI05 --> SI06
+    SI02 -.->|defects| SI01
+    SI03 -.->|defects| SI02
+    SI04 -.->|defects| SI03
+    SI05 -.->|defects| SI04
+    SI06 -.->|defects| SI05
+```
+
+The dotted backward arrows are part of the standard's own process diagram. This is not a waterfall drawn with arrows of shame — verification failures at any activity feed back to the previous one, and the whole thing is meant to run under any lifecycle, iterating as often as you like.
+
+| Activity | What it does | Signature outputs |
+|---|---|---|
+| **SI.01** Software implementation initiation | Ensures the project plan is **committed to by the work team**. That is the entire activity — the smallest one in the profile, and pure alignment | Project plan reviewed; repository access established |
+| **SI.02** Software requirements analysis | Elicits, analyses and specifies customer requirements; obtains agreement; verifies **and validates** them; puts them under version control; establishes traceability from the agreement to the requirements specification | Requirements specification, Software user documentation `[preliminary]`, Traceability record |
+| **SI.03** Software architectural and detailed design | Designs the architecture, components and interfaces, then the detailed design; **authors the test cases and test procedures**; extends traceability requirements → design → tests | Software design, Test cases and test procedures, Traceability record `[updated]` |
+| **SI.04** Software construction | Develops code and data from the design; applies **unit tests**; traces components back to design | Software components |
+| **SI.05** Software integration and tests | Integrates components, runs the tests, corrects defects, documents results; produces and verifies the **operation guideline and user documentation**; verifies the software baseline | Software, Test report, Product operation guideline, Software user documentation |
+| **SI.06** Software product assembly | Verifies the **maintenance documentation** and performs the **internal** delivery of all work products to the project manager, per the delivery instructions | Software product `[baselined]`, Maintenance documentation |
+
+### Seven SI outcomes, compressed
+
+`SI.O1` tasks performed per the plan · `SI.O2` requirements defined, testable, customer-approved, baselined, traced · `SI.O3` architecture and detailed design developed, baselined, traced · `SI.O4` components produced, unit tested, traced · `SI.O5` software integrated, verified against test cases, defects corrected, traced · `SI.O6` software product integrated with user, operation and maintenance documentation, baselined, stored · `SI.O7` verification and validation performed on **all required work products** using defined criteria.
+
+::: {.callout-important}
+## SI.06 does not deliver to the customer
+
+SI.06 is an **internal** handoff: the work team assembles the software product and gives it to the project manager. The customer never appears. Formal delivery and acceptance happen in **PM.04**.
+
+The split is deliberate — it separates *"engineering says this is complete"* from *"the business delivered it and got a signature."* Two different people, two different records ([Software Product vs Software vs Software Component](iso29110-wp-software-stuff.qmd) unpacks what is in the bundle).
+:::
+
+### The pattern that repeats six times
+
+Every SI activity begins the same way: **the work team reviews the project plan to determine task assignment.** Every SI activity ends with verification, and often validation, before its outputs are baselined.
+
+```
+for each SI activity:
+    review the plan       → who does what, this round
+    do the technical work → the thing the activity is named after
+    verify (and validate) → against the previous activity's output
+    correct defects       → until clean
+    baseline + trace      → into the project repository
+```
+
+Internalise that loop and the six activities stop being six things to memorise.
+
+---
+
+## 6. The Seven Roles
+
+Roles are **functions, not job titles, and not people**.
+
+| Abbr. | Role | Core competency the standard expects |
+|---|---|---|
+| `CUS` | **Customer** | Knows their own processes and can explain requirements; **has authority to approve requirements and changes**; includes user representatives so the operational environment is covered; domain knowledge |
+| `PJM` | **Project manager** | Leadership; experience in decision-making, planning, personnel management, delegation and supervision, finances, and software development |
+| `TL` | **Technical leader** | Knowledge and experience in the software process domain |
+| `AN` | **Analyst** | Eliciting, specifying and analysing requirements; UI design and ergonomic criteria; revision and editing techniques; development and maintenance experience |
+| `DES` | **Designer** | Software component and architecture design; **planning and performing integration tests**; revision and editing techniques |
+| `PR` | **Programmer** | Programming, integration and **unit tests**; revision and editing techniques |
+| `WT` | **Work team** | Whatever their role on the project demands (TL, AN, DES, PR), plus knowledge of the standards used by the customer or the VSE |
+
+::: {.callout-tip}
+## One person can hold several roles — and one role several people
+
+This is stated outright in the standard's conventions, and it is what makes the Basic profile survivable for a three-person team. Roles are assigned based on the characteristics of the project.
+
+The constraint that does **not** bend: `CUS` must have real approval authority, and verification is expected to be performed by someone with the organisational freedom to evaluate objectively. Signing off on your own work satisfies neither. In a tiny team that usually means pairing across the two remaining people, not appointing yourself twice.
+:::
+
+Which roles appear where:
+
+```
+PM process:   CUS   PJM   TL   WT
+SI process:   CUS   PJM   TL   WT   AN   DES   PR
+```
+
+The four engineering-specific roles exist only in SI. Note that `CUS` appears in **both** — the customer is not a spectator handing over a spec; they participate in requirements agreement, validation and change approval throughout.
+
+---
+
+## 7. Everything Lands in the Project Repository
+
+Both processes end with an *incorporation to project repository* step, and a version control strategy is applied to what goes in.
+
+```{mermaid}
+flowchart LR
+    subgraph FROM_PM["from PM"]
+        A["Project plan · Change request<br/>Acceptance record · Meeting record<br/>Correction register · Progress status record<br/>Validation record"]
+    end
+    subgraph FROM_SI["from SI"]
+        B["Requirements specification · Software design<br/>Software components · Software · Software product<br/>Test cases · Test report · Traceability record<br/>User / operation / maintenance documentation<br/>Verification record"]
+    end
+    A --> R[("Project repository<br/><i>WP.11</i>")]
+    B --> R
+    R <--> BK[("Repository backup<br/><i>WP.12</i>")]
+```
+
+The Basic profile controls work products through **four baselines**, each traceable to what precedes it:
+
+| Baseline | Traceable to |
+|---|---|
+| Requirements | the agreement approved by VSE management |
+| Specification | the requirements specification work product |
+| Design | the software architecture and detailed design work products |
+| Product | **all** work products listed in the delivery instructions, signed by customer and project manager |
+
+Those four are what your version control strategy in the Project Plan must name concretely — which tag, branch or release marks each one. Get that declaration right and ordinary Git practice becomes admissible evidence; leave it vague and it does not.
+
+---
+
+## 8. Compressed
+
+```
+2 processes    PM (governance)      SI (engineering)
+10 activities  PM.01–PM.04          SI.01–SI.06
+7 roles        CUS PJM TL WT        + AN DES PR (SI only)
+14 outcomes    PM.O1–PM.O7          SI.O1–SI.O7
+23 work products, each with defined states
+4 baselines    requirements → specification → design → product
+
+Every task cites:  Roles | Task | Input WP [state] | Output WP [state]
+Cite work as:      "PM.03.02" — process.activity.task
+Claim conformance to outcomes, not activities.
+```
+
+Next: what those 23 work products are, and what can serve as evidence for each — [Work Product Evidence CheatSheet](iso29110-work-product-cheatsheet.qmd).

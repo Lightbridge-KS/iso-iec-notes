@@ -1,0 +1,190 @@
+---
+title: "Conformance, Assessment and Certification"
+---
+
+**Scope:** What you actually conform to, who can claim it, the three flavours of assessment, and what an auditor spends their time on.
+
+**Status:** Working notes. Paraphrased for orientation only — `29110-4-1` and `29110-3` are authoritative.
+
+---
+
+## 1. You Conform to Part 4, Not Part 5
+
+The most common mistake in the whole series is conflating the guide with the specification.
+
+```{mermaid}
+flowchart LR
+    G["<b>29110-5-1-2</b><br/>Management and<br/>engineering guide<br/><br/><i>should</i> · activities · tasks<br/>roles · work products"]
+    S["<b>29110-4-1</b><br/>Profile specification<br/><br/><i>shall</i> · process requirements<br/>+ mapping to 12207"]
+    G -->|"you read and follow this"| W["Your project"]
+    W -->|"is audited against this"| S
+    S -.->|"the guide is one way<br/>to satisfy the spec"| G
+```
+
+| | `29110-5-1-2` (guide) | `29110-4-1` (specification) |
+|---|---|---|
+| Modal verb | *should* | **shall** |
+| Content | 10 activities, ~60 tasks, 23 work products, roles, tools | Process purposes and requirement statements |
+| Function | Tells you how to work | States what must be true |
+| Role in an audit | Evidence of a reasonable method | **The conformance target** |
+
+The specification's requirements are terse by comparison — the PM process requirements are roughly a dozen `shall` statements covering scope definition, task and resource definition, feasibility, estimation, resource allocation, an execution plan agreed by the customer, risk identification and monitoring, a software version control strategy including backup and restoring, configuration item identification and control, progress monitoring and reporting, and corrective action on deviations.
+
+That is the whole PM bar. The guide's four activities and dozens of tasks are one well-worked route to clearing it — not the only conceivable one, but the one that comes with free supporting material and no argument.
+
+::: {.callout-note}
+## Why the outcomes are worded oddly
+
+Process outcomes in the specification are deliberately **not** written in the present tense. The reason is portability: the same outcome statements have to serve auditing for conformity, process-capability assessment, and organisational-maturity assessment. Wording them tenselessly keeps them neutral across all three.
+:::
+
+---
+
+## 2. Who May Claim What
+
+Three rules, and the third catches people out.
+
+**A VSE claiming conformance must identify the profile.** Not "we are 29110 conformant" — *"we conform to the Software Engineering Basic Profile"*. The claim names the profile group and the profile, or it says nothing. See [Profile Groups and Profiles](profile-groups.qmd).
+
+**Conformance can be claimed to the process part of the profile** when the VSE meets *all* mandatory process requirements of the specification, plus the associated properties and requirements in the base standards where applicable.
+
+**Tool and course vendors cannot claim conformance at all.** The specification contains no requirements applicable to products that merely *facilitate* implementation — methods, courses, teaching aids, tools, forms. There is no such thing as a "29110-conformant issue tracker."
+
+::: {.callout-warning}
+## What that means when you are buying
+
+A vendor advertising a "29110-compliant" template pack, ALM tool or training course is making a claim the standard explicitly does not support. The honest version of that claim is *"supports implementation of"*. Treat the difference as a signal about how carefully the vendor has read the thing they are selling.
+:::
+
+Two further facts about the claim itself:
+
+- It **can be attested by a third party** — that is the certification route.
+- It **can be mandated as part of procurement and contractual processes** — which is the commercial reason 29110 exists at all. A customer can require it in a tender.
+
+---
+
+## 3. Three Levels of Assessment
+
+Part 3 defines certification schemes, assessment guidelines and compliance requirements covering three distinct things. They are frequently confused because all three are called "assessment".
+
+```{mermaid}
+flowchart TB
+    A["<b>Self-assessment</b><br/><br/>Who: you<br/>Why: process improvement,<br/>gap analysis before anything else<br/>Output: a to-do list<br/>Tooling: the self-assessment DP"]
+    B["<b>Conformity assessment</b><br/><br/>Who: an auditor<br/>Why: demonstrate the shall-statements<br/>of 29110-4-1 are met<br/>Output: pass / findings"]
+    C["<b>Process capability assessment</b><br/><br/>Who: a qualified assessor<br/>Why: rate how well processes<br/>are performed<br/>Output: capability profile"]
+    A -->|"cheap, repeatable,<br/>start here"| B
+    B -->|"optional, separate<br/>question"| C
+```
+
+| | Self-assessment | Conformity assessment | Capability assessment |
+|---|---|---|---|
+| Question | Where are our gaps? | Do we meet the requirements? | How well do we perform? |
+| Answers to | Yourselves | Customer, certification body | Improvement programme |
+| Binary? | No | Essentially yes | No — it is a rating |
+| Needed for certification? | No | **Yes** | No |
+
+**Certification** is the third-party attestation built on a conformity assessment. Part 3 is addressed to the people running that process — auditors, certification bodies, accreditation bodies, and the sponsor of the audit — which is exactly why a VSE only needs to read it shortly before being audited.
+
+Start with the **self-assessment deployment package** (see [Deployment Packages](deployment-packages.qmd)). It is free, it produces a gap list, and running it twice — once at the start and once before booking an audit — is the cheapest risk reduction available.
+
+---
+
+## 4. Before Anything: The Minimal Conditions
+
+The specification states conditions assumed to already hold before the Basic profile can be used at all:
+
+| # | Condition |
+|---|---|
+| 1 | There is a **project contract or agreement with scope** |
+| 2 | Cost, technical and schedule **feasibility was performed before the project start** |
+| 3 | The project working team, **including the project manager, is assigned and trained** |
+| 4 | Goods, services and infrastructure are available |
+
+The guide adds a fifth: the **development cycle is documented**.
+
+These are pre-conditions, not tasks — nothing in the process produces them. A project that began without a documented, baselined agreement cannot retro-fit condition 1 by writing one now and dating it. Fix this before the project starts or accept the finding.
+
+---
+
+## 5. What an Auditor Actually Checks
+
+Everything in the profile reduces to one question asked repeatedly:
+
+> **Did this work product reach the state the standard requires, and can you show the transition?**
+
+Possession of a file proves nothing. The evidence is the transition — `initiated → verified/validated → approved → baselined`. The current guide defines these states precisely; the ones that carry weight:
+
+| State | What it asserts |
+|---|---|
+| **Initiated** | The workflow for the work product has begun |
+| **Preliminary** | Exists but has not yet been submitted for approval |
+| **Reviewed** | Presented to the authorised customer or stakeholder for comment |
+| **Evaluated** | Has been verified **and** validated |
+| **Approved** | An authorised stakeholder checked it is ready for delivery and signed off |
+| **Baselined** | Approved **and** uploaded to the repository — a stable base for further development |
+| **Corrected** | Identified defects have been removed |
+| **Recovered** | Successfully restored from a repository — the word that makes backup verification mandatory |
+| **Delivered** | Approved by the customer or authorised stakeholder and handed over |
+
+::: {.callout-important}
+## Approved ≠ baselined
+
+`Approved` is a *judgement* by a person with authority. `Baselined` is approved **plus** stored in the controlled repository. Two separate events, and an audit can fail on the gap between them: a design document that everyone agreed to in a meeting but that never landed in version control is approved and not baselined.
+
+The Git-native reading: approval is the review sign-off; baselining is the merge plus tag. Both need to be visible.
+:::
+
+### The five findings to expect
+
+Ordered by how often they land, drawing on the [work product cheatsheet](iso29110-work-product-cheatsheet.qmd):
+
+1. **Traceability record (WP.21)** — no native tooling produces it, so it is either automated or absent. There is no partial credit.
+2. **Repository backup recovery (WP.12)** — the `recovered` state means a *restore* was demonstrated. A backup that has never been restored is not evidence.
+3. **Verification and validation records (WP.22, WP.23)** — PM.O7 has no dedicated activity, so quality assurance is only ever evidenced by this accumulated pile. Teams that verify informally have nothing to show.
+4. **Progress status record (WP.09)** — must cover cost and effort actuals and **the reason for each deviation**, not just task completion. Issue trackers do not carry money.
+5. **Correction register vs change request (WP.04 vs WP.03)** — plan deviations and product changes are different registers with different lifecycles. Conflating them is the most common conceptual error in the profile.
+
+---
+
+## 6. A Realistic Path
+
+```{mermaid}
+flowchart TB
+    A["<b>0. Scope the VSE</b><br/>which department or project<br/>is claiming conformance"]
+    B["<b>1. Satisfy the minimal conditions</b><br/>agreement · feasibility · trained team ·<br/>infrastructure · documented lifecycle"]
+    C["<b>2. Self-assess</b><br/>self-assessment DP → gap list"]
+    D["<b>3. Close gaps in risk order</b><br/>version control strategy → project plan →<br/>requirement IDs → V&V records → traceability"]
+    E["<b>4. Run one real project end to end</b><br/>PM.01→PM.04 and SI.01→SI.06,<br/>producing the work products as you go"]
+    F["<b>5. Self-assess again</b><br/>this time against real evidence"]
+    G["<b>6. Conformity assessment</b><br/>third-party audit, if the<br/>commercial case justifies it"]
+    A --> B --> C --> D --> E --> F --> G
+```
+
+Step 5 is the one people cut, and it is the cheapest step in the diagram.
+
+Whether step 6 is worth it is a commercial question, not an engineering one. Certification buys admissibility in tenders that ask for it. If nobody is asking, steps 0–5 deliver essentially all of the engineering benefit — a disciplined plan, controlled versions, traceable requirements, and evidence you verified your own work.
+
+---
+
+## 7. Compressed
+
+```
+CONFORM TO      29110-4-1  (shall)      — the specification
+FOLLOW          29110-5-1-2 (should)    — the guide
+READ FOR AUDIT  29110-3                 — schemes and assessment
+
+The claim must name the profile:
+   "conformant to the Software Engineering Basic Profile"
+Tool and course vendors cannot claim conformance at all.
+
+Three assessments, often confused:
+   self  → gaps        conformity → shall-statements
+                       capability → how well
+
+The audit question, asked 23 times:
+   did this work product reach its required STATE,
+   and can you show the transition?
+
+approved  = a person with authority signed off
+baselined = approved AND in the controlled repository
+```

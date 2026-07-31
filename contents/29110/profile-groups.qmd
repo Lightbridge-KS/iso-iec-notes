@@ -1,0 +1,146 @@
+---
+title: "Profile Groups and Profiles"
+---
+
+**Scope:** How ISO/IEC 29110 is partitioned — profile *groups* (which class of VSE you are) and profiles (how much scope you need) — and how to pick the one document you should be reading.
+
+**Status:** Working notes. Paraphrased for orientation only.
+
+---
+
+## 1. Two Independent Choices
+
+Newcomers collapse these into one question and get lost. They are orthogonal.
+
+```{mermaid}
+flowchart LR
+    subgraph G["① Profile GROUP — what kind of VSE are you?"]
+        direction TB
+        G1["Generic — no safety-critical work,<br/>typical situational factors"]
+        G2["Specific — everything else"]
+    end
+    subgraph P["② Profile — how much scope do you need?"]
+        direction TB
+        P1["Entry"] --> P2["Basic"] --> P3["Intermediate"] --> P4["Advanced"]
+    end
+    G --> P
+```
+
+**Profile group** answers *does the standard family fit my situation at all?* It is a gate.
+**Profile** answers *how much of it do I take on?* It is a dial.
+
+Almost everyone reading these notes lands on **Generic → Basic**, which is why that combination has by far the richest supporting material.
+
+---
+
+## 2. Choice ①: The Profile Group
+
+A **generic profile group** is defined as applying to VSEs that do **not** develop safety-critical systems or software products, and that have **typical situational factors**. Two exclusions, and the second is the sneaky one — "typical" means nothing unusual about domain, criticality, regulatory regime or team distribution is pulling you off the standard shape.
+
+If the generic group does not fit, the series now carries a **specific profile group** track:
+
+| | Generic profile group | Specific profile group |
+|---|---|---|
+| Requirements document | `29110-4-m` | `29110-6-m` |
+| Guideline document | `29110-5-m-n` | `29110-7-m` |
+| For | Ordinary VSEs, no safety-criticality | VSEs whose domain needs a tailored profile |
+
+The specific-profile track is the newer half of the series and is thinly populated compared with the generic one. In practice, if you are outside the generic group, your realistic options are to apply a domain standard directly (IEC 62304, DO-178C, IEC 61508) and use 29110 only as internal project discipline.
+
+### The two engineering streams
+
+Within the generic group, the *group number* encodes software vs. systems engineering:
+
+| Group | Stream | Base standard | Spec | Guides |
+|---|---|---|---|---|
+| **1** | Software engineering | ISO/IEC/IEEE 12207 | `29110-4-1` | `29110-5-1-1 … 5-1-4` |
+| **6** | Systems engineering | ISO/IEC/IEEE 15288 | `29110-4-6` | `29110-5-6-1 … 5-6-4` |
+
+::: {.callout-tip}
+## Building a device, not just software?
+
+The standard is explicit about this fork: VSEs that develop **systems containing software components** are invited to use the *systems engineering* Basic profile guide, **`29110-5-6-2`**, rather than the software one.
+
+A medical AI product that ships as a deployed service is software. A product where an imaging workstation, a network appliance and firmware are part of what you deliver is a *system* — and the systems-engineering stream carries the requirements-allocation and system-integration activities the software stream simply does not have.
+:::
+
+---
+
+## 3. Choice ②: The Profile — a Roadmap, Not a Ladder
+
+The Generic profile group is a **four-profile roadmap** designed to carry a VSE "from start-ups to grown-ups". Each step widens *scope*; none of them grades your *capability*.
+
+```{mermaid}
+flowchart LR
+    E["<b>Entry</b><br/>5-1-1<br/><br/>start-up or<br/>tiny project"]
+    B["<b>Basic</b><br/>5-1-2<br/><br/>one product,<br/>one work team"]
+    I["<b>Intermediate</b><br/>5-1-3<br/><br/>several projects,<br/>several teams"]
+    A["<b>Advanced</b><br/>5-1-4<br/><br/>a business, not<br/>just projects"]
+    E --> B --> I --> A
+```
+
+| Profile | Guide | Targeted at | What it adds over the previous step |
+|---|---|---|---|
+| **Entry** | `29110-5-1-1` | Start-up VSEs (operating less than ~3 years) and/or very small projects (roughly under 6 person-months) | — |
+| **Basic** | `29110-5-1-2` | VSEs developing **a single product by a single work team** | Full PM + SI process, 23 work products, baselines and traceability |
+| **Intermediate** | `29110-5-1-3` | VSEs running **more than one project in parallel, with more than one work team** | Business management and acquisition processes; portfolio-level concerns |
+| **Advanced** | `29110-5-1-4` | VSEs sustaining and growing as an independent competitive business | Business-level management beyond project delivery |
+
+::: {.callout-warning}
+## Do not read this as a maturity ladder
+
+There is no "Level 2 compliance". Entry is not *worse* than Basic — it is *smaller*. A two-person start-up correctly applying Entry is fully conformant to what it claims. Moving to Basic is a decision about the scope of work you take on, not a promotion.
+
+The corollary matters commercially: a customer asking "are you 29110 certified?" is asking an incomplete question. The answer is always *"certified to profile X of profile group Y"*.
+:::
+
+### Where the effort actually jumps
+
+Entry → Basic is the real step change, and it is where most VSEs live. Basic is the first profile that demands the full apparatus:
+
+- both processes complete — **PM.01–PM.04** and **SI.01–SI.06**
+- the **23 work products**, each with defined states
+- **baselines** (requirements, specification, design, product) and **traceability** between them
+- verification and validation as tasks embedded in the workflow, not as an afterthought
+
+That last cluster is what an auditor will spend their time on. See [The Two Processes](processes.qmd) and the [Work Product Evidence CheatSheet](iso29110-work-product-cheatsheet.qmd).
+
+---
+
+## 4. Choosing, in Practice
+
+```{mermaid}
+flowchart TB
+    S(["Start"]) --> Q1{"Does failure risk<br/>death, serious injury,<br/>or severe damage?"}
+    Q1 -->|yes| X["Generic profile group<br/>does not apply.<br/>IEC 62304 / domain standard."]
+    Q1 -->|no| Q2{"Do you deliver a<br/>system with hardware,<br/>or software only?"}
+    Q2 -->|"system"| SE["Systems engineering stream<br/>29110-4-6 / 5-6-n"]
+    Q2 -->|"software only"| Q3{"More than one project<br/>and more than one<br/>work team, in parallel?"}
+    Q3 -->|yes| INT["<b>Intermediate</b> — 5-1-3"]
+    Q3 -->|no| Q4{"Start-up, or project<br/>under ~6 person-months?"}
+    Q4 -->|yes| ENT["<b>Entry</b> — 5-1-1"]
+    Q4 -->|no| BAS["<b>Basic</b> — 5-1-2<br/>(the usual answer)"]
+```
+
+Two practical notes that decision tree cannot show:
+
+**Scope the VSE, not the company.** Because a *project* or a *department* qualifies as a VSE, you choose the boundary. A single product line inside a larger organisation can adopt Basic without dragging the rest of the organisation into it. Declare the boundary explicitly — the audit scope is whatever you declared.
+
+**Editions move.** The `5-1-n` guides are being revised out of Technical Report form into International Standards on a rolling basis; Entry (`5-1-1`) and Basic (`5-1-2`) reached that state in 2025, with Intermediate and Advanced following. Before quoting a task ID or a work-product name, check which edition your source used — the [Deployment Packages](deployment-packages.qmd) chapter covers the specific renamings that trip people up.
+
+---
+
+## 5. Compressed
+
+```
+PROFILE GROUP  = a gate.  Am I in scope at all?
+                 Generic = not safety-critical, nothing unusual.
+                 Group 1 = software (12207).  Group 6 = systems (15288).
+
+PROFILE        = a dial.  How much scope do I take on?
+                 Entry → Basic → Intermediate → Advanced
+                 = size of the endeavour, NOT quality of the team.
+
+The pair you name in a conformance claim is (group, profile).
+Naming only one is meaningless.
+```
