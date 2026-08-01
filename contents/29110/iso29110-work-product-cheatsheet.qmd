@@ -115,7 +115,7 @@ Status *against the plan*: actual vs planned tasks, results vs objectives, actua
 **Gap warning:** a milestone burndown alone misses cost, risk and reason-for-deviation.
 
 ### WP.10 — Project Plan
-The largest document. Contains product description, scope, objectives, **selected development cycle** (waterfall / iterative / incremental / evolutionary / agile — you declare it), deliverables, tasks *including verification, validation and review tasks* (may be a WBS), estimated durations, resources incl. training, work team composition, schedule with dependencies, estimated effort and cost, risks, plus two critical sub-sections:
+The largest document. Contains product description, scope, objectives, **selected development cycle** (waterfall / iterative / incremental / evolutionary / agile — you declare it; see [Development Cycles: A Crash Course](../foundations/development-cycle-explained.qmd)), deliverables, tasks *including verification, validation and review tasks* (may be a WBS), estimated durations, resources incl. training, work team composition, schedule with dependencies, estimated effort and cost, risks, plus two critical sub-sections:
 
 **Version control strategy** — repository tool and location, access mechanisms, version identification and control, **description of the baselines selected** (requirements / design / product), backup and recovery mechanisms, storage-handling-delivery mechanisms.
 > This is where you declare that Git + GitHub *is* your mechanism. Writing it properly is what allows normal Git practice to count as evidence elsewhere.

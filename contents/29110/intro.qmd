@@ -161,7 +161,7 @@ flowchart LR
     Q -->|yes| S["IEC 62304 + ISO 13485<br/>29110 as project discipline only"]
 ```
 
-**Not a methodology.** 29110 is explicitly intended to be used with any lifecycle — waterfall, iterative, incremental, evolutionary or agile — and task descriptions deliberately impose no technique or method. The standard says *what* must be true; choosing *how* is left entirely to the VSE. A task saying "verify the requirements specification" is satisfied by a review meeting, a checklist, or a pull-request approval, as you decide and declare.
+**Not a methodology.** 29110 is explicitly intended to be used with any lifecycle — waterfall, iterative, incremental, evolutionary or agile ([what each one means](../foundations/development-cycle-explained.qmd)) — and task descriptions deliberately impose no technique or method. The standard says *what* must be true; choosing *how* is left entirely to the VSE. A task saying "verify the requirements specification" is satisfied by a review meeting, a checklist, or a pull-request approval, as you decide and declare.
 
 ---
 

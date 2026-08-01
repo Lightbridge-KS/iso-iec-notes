@@ -64,13 +64,15 @@ The profile assumes five things are already true. These are not tasks inside the
 | 1 | The **project agreement** is documented, approved by VSE management, and **baselined before the project starts** |
 | 2 | A **feasibility study** was performed before the project start |
 | 3 | The **project team, including the project manager, is assigned and trained** |
-| 4 | The **development cycle** is documented — waterfall, iterative, incremental, evolutionary or agile |
+| 4 | The **development cycle** is documented — waterfall, iterative, incremental, evolutionary or agile ([crash course](../foundations/development-cycle-explained.qmd)) |
 | 5 | Goods, services and infrastructure to start the project are available |
 
 ::: {.callout-warning}
 ## Condition 4 is the one people skip
 
 You must *declare* your lifecycle. The standard is lifecycle-agnostic, and that agnosticism has a price: the burden of naming it moves to you. "We do agile" is not a documented development cycle. What the sprint boundary means for a baseline, when verification happens relative to a merge, what "approved" means for a work product in your flow — that is the declaration. Everything downstream is judged against it.
+
+The five names are given without definitions anywhere in the standard, and two of them are routinely confused — [Development Cycles: A Crash Course](../foundations/development-cycle-explained.qmd) works through each one and what it costs you in work products.
 
 Condition 3's word **trained** is the other quiet one — competence in the roles below is expected to be evidenced, not assumed.
 :::

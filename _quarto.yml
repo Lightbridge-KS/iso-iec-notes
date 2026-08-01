@@ -15,6 +15,10 @@ book:
     #       href: "contents/overview/landscape.qmd"
     #     - text: Vocabulary
     #       href: "contents/overview/vocabulary.qmd"
+    - part: Foundations
+      chapters:
+        - text: "Development Cycles: A Crash Course"
+          href: "contents/foundations/development-cycle-explained.qmd"
     - part: ISO/IEC 29110
       chapters:
         - text: What ISO/IEC 29110 Is

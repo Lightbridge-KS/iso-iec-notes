@@ -1,0 +1,369 @@
+---
+title: "Development Cycles: A Crash Course"
+---
+
+**Scope:** What *waterfall*, *iterative*, *incremental*, *evolutionary* and *agile* actually mean, how they differ, and how to choose and declare one.
+
+**Status:** Working notes. Definitions are paraphrased from ISO/IEC/IEEE 24748-1 and ISO/IEC/IEEE 15288; the standards are authoritative.
+
+---
+
+## 1. Why This Chapter Exists
+
+ISO/IEC 29110 names these five in at least six places and **defines none of them**. It hands you a list and moves on:
+
+> ...intended to be used with any life cycle, such as waterfall, iterative, incremental, evolutionary or agile.
+
+That would be harmless if the choice were cosmetic. It is not. In the Basic profile the development cycle is:
+
+| Where it appears | Why it binds you |
+|---|---|
+| **Entry condition** | The development cycle **should be documented** before the project starts |
+| **PM.01.01** | The *first task of the entire profile* — review the agreement for the development cycle. Its output is `Project plan [initiated] — Development cycle` |
+| **PM.01.03** | Tasks to produce the work products are identified **according to the development cycle selected** |
+| **WP.10 Project Plan** | "Development cycle selected" is a named element of the plan |
+
+So it is the first decision you make, it is a named element of your largest document, and **it determines your task breakdown**. Choosing badly, or choosing vaguely, propagates into every work product downstream.
+
+See [The Two Processes](../29110/processes.qmd) for where PM.01.01 sits, and the [Work Product Evidence CheatSheet](../29110/iso29110-work-product-cheatsheet.qmd) for WP.10.
+
+::: {.callout-note}
+## A vocabulary warning before we start
+
+These five words are used loosely everywhere, including by people who should know better, and *especially* interchangeably for "iterative" and "incremental". This chapter uses the ISO definitions. Where common industry usage differs, that is flagged.
+
+Note also that the terms describe the **development stage**, not the whole life cycle. A product can be developed incrementally and then operated, supported and retired in an entirely conventional way.
+:::
+
+---
+
+## 2. Three Questions Generate All Five
+
+Rather than memorise five models, ask three questions. The models are just the answer combinations that turn out to be useful.
+
+```{mermaid}
+flowchart TB
+    Q1{"<b>Q1.</b> How many passes<br/>through build?"}
+    Q1 -->|"one"| W["<b>WATERFALL</b>"]
+    Q1 -->|"many"| Q2{"<b>Q2.</b> What does<br/>each pass produce?"}
+    Q2 -->|"a better version<br/>of the whole thing"| IT["<b>ITERATIVE</b>"]
+    Q2 -->|"a new usable<br/>slice of scope"| INC["<b>INCREMENTAL</b>"]
+    Q2 -->|"both"| Q3{"<b>Q3.</b> Do the requirements<br/>themselves change<br/>as you learn?"}
+    Q3 -->|"no — fixed up front"| PLAN["planned<br/>iterative + incremental"]
+    Q3 -->|"yes — discovered"| EV["<b>EVOLUTIONARY</b>"]
+    EV -->|"+ timeboxing, collaboration,<br/>continual feedback"| AG["<b>AGILE</b>"]
+```
+
+| | Passes | Each pass yields | Requirements |
+|---|---|---|---|
+| **Waterfall** | One | The finished product | Fixed up front |
+| **Iterative** | Many | A refinement of the whole | Fixed up front |
+| **Incremental** | Many | A new working slice | Fixed up front, partitioned |
+| **Evolutionary** | Many | Learning, then a revised target | **Discovered as you go** |
+| **Agile** | Many, timeboxed | A usable slice **and** revised understanding | Discovered, continuously |
+
+The critical dividing line is **Q3**, not Q1. Waterfall, iterative and incremental all assume you know what you are building. Evolutionary and agile assume you do not — and that finding out is part of the work.
+
+---
+
+## 3. Waterfall (Sequential)
+
+Each phase completes and is signed off before the next begins. One pass, no going back by design.
+
+```{mermaid}
+flowchart LR
+    A["Requirements"] --> B["Design"] --> C["Construction"] --> D["Integration<br/>& test"] --> E["Delivery"]
+```
+
+**Defining characteristic:** a phase is *finished* — reviewed, approved, baselined — before the next starts. Progress is measured by phases completed.
+
+**When it genuinely fits.** Requirements are stable and externally fixed; the domain is well understood; a regulator or customer requires phase-gate evidence; the cost of changing course late is enormous. Firmware against a frozen hardware spec. A payroll rule change dictated by legislation.
+
+**How it fails.** Every requirement error is discovered at integration, when it is most expensive. There is no working software until near the end, so nobody can *react* to the thing being built. The plan looks perfectly on track until it is catastrophically not.
+
+::: {.callout-warning}
+## Waterfall is not a straw man
+
+The caricature — "nobody ever really did waterfall" — is unhelpful. Winston Royce's 1970 paper, routinely cited as the origin of waterfall, presented the pure sequential model as **the thing that does not work** and then argued for feedback loops and prototyping. The industry adopted the diagram and skipped the argument.
+
+The practical lesson: pure single-pass waterfall is a poor default, but a sequenced, gated cycle is entirely legitimate when the requirements really are fixed. Do not pick it out of habit, and do not reject it out of fashion.
+:::
+
+**In 29110 terms:** the easiest cycle to evidence. `SI.02 → SI.06` runs once, work products transition through their states once, and the four baselines fall naturally at phase boundaries.
+
+---
+
+## 4. Iterative
+
+Repeat the same work on the same thing, improving it each pass.
+
+ISO defines an **iteration** as repeating the application of the same process "on the same level of the system structure". The phrase *same level* is the whole distinction — you are going back over the same ground, not moving to new ground.
+
+```{mermaid}
+flowchart LR
+    A["Rough version<br/>of the whole"] --> B["Better version<br/>of the whole"] --> C["Better still"] --> D["Good enough<br/>to ship"]
+    B -.->|"refine"| A
+    C -.->|"refine"| B
+    D -.->|"refine"| C
+```
+
+**Defining characteristic:** scope stays constant; **quality, fidelity and detail increase**. Pass three covers the same features as pass one, done better.
+
+**When it fits.** The shape of the solution is uncertain even though the goal is clear. UI and interaction design. Model development — a first model on real data, then better features, then tuning. Performance work.
+
+**How it fails.** Without an explicit exit criterion, iteration becomes polishing. You can always do another pass, and no pass ever produces something a user can have.
+
+**In 29110 terms:** `SI.02–SI.05` repeat, and each pass re-baselines. Your version control strategy in WP.10 must say what "the requirements baseline" means when there have been four of them — normally: the latest approved one, with the earlier ones retained and recoverable.
+
+---
+
+## 5. Incremental
+
+Build and deliver the product in slices. Each slice is a usable piece of the final whole.
+
+```{mermaid}
+flowchart LR
+    subgraph P["Planned scope, partitioned up front"]
+        A["Increment 1<br/>requirements → design →<br/>build → test → <b>deliver</b>"]
+        A --> B["Increment 2<br/>requirements → design →<br/>build → test → <b>deliver</b>"]
+        B --> C["Increment 3<br/>…"]
+    end
+```
+
+**Defining characteristic:** each increment adds *new capability* and is potentially usable. Scope grows; the parts already built are essentially done.
+
+**When it fits.** The full scope is understood and separable, and the customer benefits from getting part of it early. A reporting system where three of twelve reports cover most of the value. Anything where early delivery de-risks funding or adoption.
+
+**How it fails.** Slicing badly. If increment 1 is "the database layer" the customer gets nothing usable, and you have merely renamed waterfall phases. Increments must be vertical slices through the whole stack, not horizontal layers. Architectural decisions made for increment 1 can also strand increments 4–7.
+
+**In 29110 terms:** the profile handles this cleanly but you must plan it. PM.01 defines the increments; `SI.02–SI.06` runs per increment. Decide explicitly whether each increment triggers its own delivery and acceptance record (WP.01), or whether there is one acceptance at the end — and write that into the delivery instructions.
+
+---
+
+## 6. Iterative vs Incremental — Resolving the Confusion
+
+This is the single most common muddle, and the two words are not synonyms.
+
+```
+INCREMENTAL — add a new piece each time; each piece is finished
+  ┌───┐        ┌───┬───┐        ┌───┬───┬───┐
+  │ █ │   →    │ █ │ █ │   →    │ █ │ █ │ █ │
+  └───┘        └───┴───┘        └───┴───┴───┘
+  usable       more usable      complete
+
+ITERATIVE — same whole thing each time, at rising fidelity
+  ┌───────────┐   ┌───────────┐   ┌───────────┐
+  │  ░░░░░░░  │ → │  ▒▒▒▒▒▒▒  │ → │  ███████  │
+  └───────────┘   └───────────┘   └───────────┘
+  sketch          refined          finished
+```
+
+Jeff Patton's painting analogy is the one that sticks. To build the Mona Lisa **incrementally**, you paint the left third in full detail, then the middle third, then the right — each part finished as you go, and at no point can you tell whether the composition works. To build it **iteratively**, you sketch the entire canvas roughly, then refine the whole thing, then refine again — at every moment you have a complete-but-crude painting, and you can see early that the composition is wrong.
+
+| | Iterative | Incremental |
+|---|---|---|
+| Constant | Scope | Quality of what is built |
+| Growing | Quality, detail, fidelity | Scope |
+| After pass 1 you have | The whole thing, crudely | A small part, properly |
+| Buys down | **Solution risk** — is this the right design? | **Delivery risk** — can we ship at all? |
+| Fails as | Endless polishing | Layers nobody can use |
+
+**Most real processes are both**, and that is the point: they are orthogonal axes, not rival choices. Scrum is explicitly iterative *and* incremental — each sprint delivers a usable slice (incremental) while the team also improves what already exists (iterative).
+
+::: {.callout-tip}
+## The practical test
+
+Ask what pass two contains.
+
+- Pass two touches **the same features** as pass one → **iterative**.
+- Pass two adds **features pass one did not have** → **incremental**.
+- Both → you are doing what most competent teams do; say so explicitly rather than picking one word.
+:::
+
+---
+
+## 7. Evolutionary
+
+Cycles in which **the requirements themselves change** because each cycle teaches you something you could not have known at the start.
+
+```{mermaid}
+flowchart LR
+    R["Current best<br/>understanding of<br/>requirements"] --> B["Build a version"]
+    B --> U["Put it in front of<br/>users / reality"]
+    U --> L["<b>Learn</b> — some<br/>assumptions were wrong"]
+    L --> R
+```
+
+**Defining characteristic:** the *target moves, legitimately*. In waterfall, incremental and iterative development, a requirements change is a deviation to be controlled. Here it is the expected output of doing the work.
+
+**When it fits.** Nobody can specify the thing up front. Research-adjacent work. A novel clinical workflow where users cannot tell you what they need until they hold a version. Anything where the risky question is *"is this even the right thing?"*
+
+**How it fails.** Without discipline it is indistinguishable from having no plan. Cost and schedule become genuinely hard to commit to — which is exactly why fixed-price contracts and evolutionary development are a painful match. The "prototype" ships and becomes the product, carrying every shortcut it was built with.
+
+::: {.callout-important}
+## Evolutionary is where 29110 gets hardest
+
+The profile assumes an **agreement approved and baselined before the project starts**, with requirements traceable back to it. Evolutionary development means that agreement will be wrong, on purpose.
+
+This is workable, but only if you plan for it in PM.01:
+
+- **Change requests (WP.03) become a high-traffic work product**, not an exception path. The customer approves changes to requirements and the plan under `PM.03.04`.
+- The **traceability record (WP.21)** is the first thing to rot, because its anchors keep moving. Automate it or it will silently stop being true.
+- The **agreement itself may need re-approval**. Decide up front who can do that and how fast.
+- Consider scoping the agreement to an *envelope* — objectives, constraints and budget — rather than a fixed feature list.
+:::
+
+---
+
+## 8. Agile — Not a Fifth Peer
+
+Listing agile alongside the other four is a category error, and ISO's own vocabulary says so. ISO/IEC/IEEE 24748-1 defines **agile** as:
+
+> a development approach based on **iterative** development, frequent inspection and adaptation, and **incremental** deliveries in which requirements and solutions **evolve** through collaboration in cross-functional teams and through continual stakeholder feedback
+
+Read it again: agile is *defined in terms of* iterative, incremental and evolving requirements. It is a composite that adds a fourth ingredient the others lack — a **social and cadence model**.
+
+```{mermaid}
+flowchart LR
+    A["Iterative<br/><i>refine the whole</i>"] --> AG
+    B["Incremental<br/><i>ship usable slices</i>"] --> AG
+    C["Evolutionary<br/><i>requirements change</i>"] --> AG
+    D["+ timeboxing, cross-functional<br/>teams, continual feedback,<br/>inspect and adapt"] --> AG
+    AG["<b>AGILE</b>"]
+```
+
+**What agile adds that the others do not specify:** a fixed cadence (the timebox), cross-functional teams rather than handoffs between specialists, continual stakeholder feedback as a scheduled event, and an explicit inspect-and-adapt loop applied to *the process itself*, not just the product.
+
+**"Agile" also names a family, not a method.** Scrum, XP, Kanban and SAFe differ enormously. Kanban has no timebox at all. Writing "agile" in a plan is like writing "a vehicle" on a shipping form.
+
+**How it fails.** The ceremonies get adopted and the feedback loop does not — standups and sprints with no working software in front of a real user is waterfall with more meetings. Conversely, "we're agile" is used to mean "we don't write things down", which is a claim about documentation, not about a development cycle, and 29110 will not accept it.
+
+::: {.callout-warning}
+## "We do agile" is not a documented development cycle
+
+29110 is genuinely lifecycle-agnostic — it explicitly welcomes agile, evolutionary, incremental and test-driven development. But agnosticism moves the burden onto you: the standard will not tell you when a baseline happens, so **you must**.
+
+A conformant declaration answers at minimum:
+
+- **Cadence** — how long is an iteration, and what starts and ends one?
+- **Increment or iteration or both** — what does a sprint actually produce?
+- **Definition of done** — and how it maps to the states `approved` and `baselined`
+- **When verification happens** — code review, pair programming, CI gate; and who has the organisational freedom to perform it (self-approval does not qualify)
+- **What the four baselines mean** — requirements, specification, design, product — under a cadence where things change every two weeks
+- **How the backlog relates to WP.13** — a backlog is not automatically a requirements specification; requirements still need stable unique IDs and testability
+
+Do that and ordinary agile practice generates most of your evidence. Skip it and you will be reconstructing records at audit time.
+:::
+
+---
+
+## 9. Beyond the Five
+
+Three more you will meet, none of which 29110 names but all of which are legitimate to declare.
+
+**V-model.** Waterfall folded into a V, pairing each specification phase with the test level that verifies it — requirements ↔ acceptance test, architecture ↔ integration test, detailed design ↔ unit test. Not a different cycle so much as waterfall with the verification strategy made explicit. **Common in regulated medical-device work**, and it maps unusually well onto 29110's insistence that test cases be authored during design (SI.03).
+
+```
+  specification arm                                verification arm
+
+  Requirements ··································► Acceptance test
+       │              "did we build the                     ▲
+       ▼               right thing?"                        │
+    Architecture ····························► Integration test
+         │                                             ▲
+         ▼                                             │
+      Detailed design ················► Unit test
+           │                                ▲
+           ▼                                │
+             └──────► Construction ─────────┘
+
+  ····► each specification level is verified by the test level
+        opposite it — the pairing is the whole idea
+```
+
+**Spiral (Boehm).** Evolutionary, but with **risk** as the explicit driver: each loop identifies the biggest remaining risk and spends the next loop retiring it. Prototype what is dangerous, not what is easy. Worth knowing even if you never declare it, because "what is the riskiest unknown right now?" is the correct question in any evolutionary cycle.
+
+**DevOps / continuous delivery.** Added to ISO/IEC/IEEE 24748-1 in its 2024 edition, defined as principles and practices enabling collaboration between the stakeholders who specify, develop and operate the software, with continuous improvement across the life cycle. Strictly it is a delivery and operations model layered on an agile cycle rather than a development cycle in its own right — but if you release continuously, say so, because it changes what "delivered" and "baselined" mean.
+
+---
+
+## 10. What Each Cycle Does to Your 29110 Work Products
+
+The reason the choice is load-bearing:
+
+| Cycle | SI.02–SI.06 runs | Baselines | Watch out for |
+|---|---|---|---|
+| **Waterfall** | Once | Once each, at phase gates | Nothing subtle — this is the easy case |
+| **Iterative** | Repeatedly, same scope | Re-baselined each pass | Define which baseline is *the* baseline |
+| **Incremental** | Once per increment | Per increment | One acceptance record or several? Decide in the delivery instructions |
+| **Evolutionary** | Repeatedly, moving scope | Frequently, and they move | WP.21 traceability rot; WP.03 change requests become routine |
+| **Agile** | Per sprint | Per sprint, if "done" is defined | Mapping *definition of done* to `approved` / `baselined`; backlog ≠ WP.13 |
+
+Across every non-waterfall cycle the same two work products carry the strain: the **traceability record (WP.21)**, because its anchors move, and the **version control strategy inside WP.10**, because it is the only thing that says what a baseline means when the product changes weekly.
+
+---
+
+## 11. Declaring It in the Project Plan
+
+WP.10 needs one short, decisive section. A usable template:
+
+```
+DEVELOPMENT CYCLE
+
+Selected cycle:   Incremental, with iterative refinement within
+                  each increment. (Not "agile" — we do not timebox.)
+
+Rationale:        Scope is understood and separable; the customer
+                  needs the reporting slice before the ingest slice.
+
+Cadence:          Increments of ~4 weeks, scope fixed at increment start.
+
+Per increment:    SI.02 → SI.06 in full.
+                  Delivered internally to the PJM at each increment end.
+                  Formal customer acceptance (PM.04) once, at project end.
+
+Baselines:        Requirements baseline  = git tag req-vN, per increment
+                  Design baseline        = git tag design-vN
+                  Product baseline       = annotated release tag, project end
+                  Earlier baselines retained and recoverable.
+
+Verification:     Every change enters main via pull request with the
+                  verification checklist; reviewer is never the author.
+                  PR approval == work product state [approved].
+                  Merge to main + tag  == state [baselined].
+```
+
+Four sentences of honesty here save weeks later. Note what the example does: it **names the cycle precisely**, refuses a fashionable label it has not earned, and — most importantly — states **what a baseline physically is** in the tooling. That last line is what allows ordinary Git practice to count as evidence, per [Conformance](../29110/conformance.qmd).
+
+---
+
+## 12. Compressed
+
+```
+THREE QUESTIONS
+  Q1 how many passes?          one → WATERFALL
+  Q2 each pass produces?       better whole → ITERATIVE
+                               new slice   → INCREMENTAL
+  Q3 do requirements change?   yes → EVOLUTIONARY
+                               yes + timebox + team + feedback → AGILE
+
+THE ONE THAT MATTERS IS Q3
+  waterfall / iterative / incremental → you know what you're building
+  evolutionary / agile                → finding out IS the work
+
+ITERATIVE ≠ INCREMENTAL
+  iterative    same scope, rising quality   → buys down SOLUTION risk
+  incremental  rising scope, done quality   → buys down DELIVERY risk
+  orthogonal axes — most good teams do both
+
+AGILE IS A COMPOSITE, NOT A PEER
+  ISO defines it AS iterative + incremental + evolving requirements
+  + timeboxing, cross-functional teams, continual feedback
+
+FOR 29110
+  chosen at PM.01.01 — the first task in the profile
+  named in WP.10, and it determines the task breakdown
+  "we do agile" is NOT a documented development cycle
+  say: cadence · what a pass produces · definition of done
+       · when verification happens · what a baseline physically is
+```
