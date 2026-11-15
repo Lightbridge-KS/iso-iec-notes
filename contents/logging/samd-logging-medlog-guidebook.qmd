@@ -1,0 +1,932 @@
+---
+title: "Logging Guidebook for a PACS-Connected SaMD AI App on Linux"
+subtitle: "Linux logging ecosystem + MedLog clinical-AI event logging"
+---
+
+
+| | |
+|---|---|
+| Prepared for | Kittipos Sirivongrungson (RAMAAI R&D), and the AI coding agent he works with |
+| Status | Draft v1 · 2026-11-15 |
+| MedLog version | Spec **0.0.1** (pre-1.0). Live spec checked on 2026-11-15: version, five endpoints, required envelope fields and all six enums are unchanged |
+| Scope | Designing the logging of a Software-as-a-Medical-Device (SaMD) AI app that receives studies from PACS, runs on a hospital Linux server, and returns results to radiologists |
+
+---
+
+## 0. How to use this guidebook
+
+**For KS:** Sections 1–3 give the big picture. Section 20 lists the decisions only you (with the hospital) can make. Section 21 is a ready-to-paste prompt for the coding agent.
+
+**For the coding agent:**
+
+- Treat **Section 7 (Requirements)** as the spec for this work. Each item has an ID (`ML-Mxx`, `ML-Sxx`, `R-xx`) so you can cite it in commits, PRs and QMS records.
+- Each requirement is tagged with its source:
+  - `[SPEC]` = MedLog OpenAPI 0.0.1. This is the normative wire format and the ground truth.
+  - `[PAPER]` = the MedLog paper (arXiv 2510.04033). This is design guidance.
+  - `[REC]` = a recommendation made in this guidebook for *this* app. It is a design choice open to discussion, not part of MedLog.
+- Copy enum values **verbatim** from Appendix A. Never invent values.
+- Example payloads in Section 10 and the emitter in Section 11 were **validated against the 0.0.1 schema** with a mock collector before this guide was written.
+- MedLog is pre-1.0. Before you implement, re-check the live spec at <https://medlogprotocol.ai/api-reference/openapi.yaml>.
+- Ask KS before deciding anything listed in Section 20.
+
+---
+
+## 1. TL;DR: the twelve rules
+
+1. **Use three logging planes and never mix them.** Ops logs go to journald. Clinical-AI events go to MedLog. Security audit goes to auditd and DB audit. (§3)
+2. **Keep PHI out of journald and syslog.** They store clear text. Correlate the planes by `event_id` and `run_id` only.
+3. **Write one MedLog record per model invocation.** This includes automatic, PACS-triggered runs.
+4. **Post `inference-start` *before* the model runs.** A failed inference must still leave a record.
+5. **Every event carries `medlog_version: "0.0.1"`.** Not `"1.0"`.
+6. **Use the wire shape:** envelope fields go at the top level, and there is **no `header` object**.
+7. **`model_version` is mandatory in practice.** It must match the released SaMD version in your QMS.
+8. **Log pointers, not pixels.** Inputs and outputs are referenced by URI (DICOMweb URL or `urn:oid:`).
+9. **Record what the radiologist actually saw** (SR text, overlay, triage flag), not just the raw score.
+10. **Outcome linkage is a separate, delayed job** that compares AI output against the final report.
+11. **Logging must never block diagnosis.** Use a local outbox (write-behind) with retry.
+12. **Treat the MedLog store like the EHR:** encrypted, access-controlled, access-audited, inside the firewall, and append-only.
+
+---
+
+## 2. Context and assumptions (confirm these)
+
+| Item | Assumed | Why it matters |
+|---|---|---|
+| Server OS | systemd-based Linux (Ubuntu/Debian or RHEL family) | Ops logging uses journald |
+| Deployment | systemd service, or Docker with the `journald` log driver | How stdout reaches journald |
+| PACS integration | DICOM DIMSE (C-STORE auto-routing) and/or DICOMweb | Shapes `input_uri` / `output_uri` |
+| Trigger modes | Auto-routed (no human caller) and/or on-demand by a radiologist | Sets `caller_type` |
+| Output to user | DICOM SR, and/or Secondary Capture / GSPS overlay, and/or worklist priority flag | Sets `output_type` and the "what was seen" content |
+| Ground truth | Final radiologist report in RIS/HIS (sometimes pathology or follow-up imaging) | Outcome linkage |
+| Jurisdiction | Thailand: PDPA (health data is sensitive personal data), Thai FDA for medical devices | Privacy and retention |
+
+---
+
+## 3. Architecture: three logging planes
+
+```
+                Modality ──► PACS ──auto-route / query──┐
+                                                        ▼
+                                   ┌──────────────────────────────────┐
+     radiologist (on-demand) ────► │  AI gateway / DICOM router        │ ◄── instrument HERE
+                                   │  (single chokepoint, ML-S02)      │
+                                   └───┬───────────────┬──────────────┘
+                                       │               │
+                                       ▼               │
+                                   AI model            │
+                                       │               │
+                     SR / overlay ◄────┘               │
+                     back to PACS viewer               │
+                                                       │
+     ┌─────────────────────────────────────────────────┼───────────────────────────┐
+     │ PLANE A: Ops / technical  │ PLANE B: Clinical-AI (MedLog)  │ PLANE C: Security │
+     │ journald → (rsyslog→SIEM) │ outbox → MedLog collector → DB │ auditd, pgAudit,  │
+     │ NO PHI                    │ PHI · encrypted · append-only   │ access logs       │
+     │ errors, latency, health   │ 1 record / model invocation     │ who touched what  │
+     └───────────────────────────┴────────────────────────────────┴───────────────────┘
+                   ▲  correlated only by event_id / run_id (never by HN or name)  ▲
+```
+
+| | **A. Ops plane** | **B. Clinical-AI plane (MedLog)** | **C. Security-audit plane** |
+|---|---|---|---|
+| Question it answers | "Is the service healthy? Why did it crash?" | "What did the AI see, say, and was it right?" | "Who accessed or changed what?" |
+| Audience | DevOps, R&D engineers | Radiologists, AI/ML team, QA/RA, safety reviewers | IT security, DPO, auditors |
+| Content | Errors, stack traces, latency, queue depth, DICOM association status | Model, caller, target, input pointers, outputs, outcomes, feedback | Logins, sudo, config changes, reads of the MedLog store |
+| PHI | **None.** Use `event_id` as the join key | Yes (pseudonymised where possible) | Minimal |
+| Transport / store | stdout → journald → optional rsyslog → SIEM | HTTPS POST (5 endpoints) → collector → DB | auditd, DB audit extension, collector access log |
+| Retention tool | journald limits, logrotate | Retention policy (never logrotate), tiered | Hospital security policy |
+| Mutability | Rotated or deleted by size and age | **Write-once / append-only** | Append-only, protected |
+
+> **Why not just use syslog for everything?** MedLog borrows syslog's *architecture* (an event stream to a central collector) but none of its fields. syslog is clear text with no default encryption, its retention tools delete old data, and it is designed for IT staff. MedLog records contain PHI, need encryption, must be kept as records, and serve clinicians and regulators.
+
+---
+
+## 4. Linux logging ecosystem: a primer
+
+```
+ SOURCES                                   COLLECT                 STORE / ROTATE            READ / SHIP
+ kernel printk ──► ring buffer ─┐
+ services stdout/stderr ────────┼──► systemd-journald ──► /var/log/journal  ──► journalctl
+ apps syslog() → /dev/log ──────┘          │               (SystemMaxUse=, vacuum)
+                                           └─forward─► rsyslog / syslog-ng ──► /var/log/*.log ──► logrotate
+                                                              └── TCP/TLS ──► central SIEM / ELK / Loki / Graylog
+ auditd (kernel audit) ─────────────────────────────────────► /var/log/audit/audit.log ──► ausearch
+```
+
+**Components**
+
+- **systemd-journald** is the modern hub. It keeps a structured, indexed, binary journal and adds metadata to every entry (unit, PID, UID, boot ID). The journal is persistent in `/var/log/journal`, or volatile in `/run/log/journal`, which is lost at reboot.
+- **rsyslog / syslog-ng** are the classic syslog daemons. They write text files and forward to remote servers. Debian 12 and Fedora ship journald only by default.
+- **`/var/log`** holds the text logs:
+  - `syslog` (Debian/Ubuntu) or `messages` (RHEL): the main log
+  - `auth.log` or `secure`: authentication and sudo
+  - `kern.log`: kernel messages
+  - `wtmp` / `btmp`: binary login records, read with `last` / `lastb`
+- **logrotate** compresses and deletes old text logs. **It is never used for MedLog records.**
+- **auditd** is the kernel audit framework. It watches files and syscalls and writes `/var/log/audit/audit.log`.
+- **Centralisation** happens at two levels. At the protocol level: rsyslog forwarding (TCP+TLS) or `systemd-journal-remote`. At scale: shippers such as Fluent Bit, Vector or Promtail, with OpenTelemetry as the emerging standard.
+
+**syslog severities.** Use these for ops-plane levels. They are not MedLog fields.
+
+| 0 emerg | 1 alert | 2 crit | 3 err | 4 warning | 5 notice | 6 info | 7 debug |
+|---|---|---|---|---|---|---|---|
+
+---
+
+## 5. Ops plane: practical configuration `[REC]`
+
+### 5.1 systemd unit (excerpt)
+
+```ini
+# /etc/systemd/system/ramaai-ai.service
+[Service]
+ExecStart=/opt/ramaai/bin/ramaai-ai
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ramaai-ai
+LogExtraFields=APP=ramaai-ai
+LogExtraFields=ENV=production
+# Avoid journald dropping bursts during heavy study loads
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=20000
+```
+
+### 5.2 journald retention (drop-in)
+
+```ini
+# /etc/systemd/journald.conf.d/50-ramaai.conf
+[Journal]
+Storage=persistent
+Compress=yes
+SystemMaxUse=4G
+SystemKeepFree=10G
+MaxRetentionSec=90d
+# ForwardToSyslog=yes   # only if rsyslog forwards to the hospital SIEM
+```
+
+Apply the change with `sudo systemctl restart systemd-journald`.
+
+### 5.3 What an ops log line should look like
+
+Use structured logging with one event per line, and attach correlation keys, never identifiers:
+
+```json
+{"ts":"2026-11-15T03:41:07.512Z","level":"error","component":"inference",
+ "medlog_event_id":"5f0c…","medlog_run_id":"a1b2…","error_code":"GPU_OOM",
+ "msg":"inference failed; result not delivered","latency_ms":2210}
+```
+
+- **Allowed in ops logs:** `medlog_event_id`, `medlog_run_id`, error codes, durations, queue sizes, DICOM association status, AE titles, model version.
+- **Forbidden in ops logs:** patient name, HN/MRN, accession number, birth date, StudyInstanceUID/SOPInstanceUID, report text, and image pixels or thumbnails. DICOM UIDs and accession numbers can identify a patient, so treat them as PHI.
+- For native journald fields, use `systemd.journal.send(MESSAGE=..., MEDLOG_EVENT_ID=...)` from `python-systemd`, then query with `journalctl MEDLOG_EVENT_ID=<uuid>`. Field names must be UPPERCASE letters, digits and underscores.
+- If the app runs in **Docker**, set `"log-driver": "journald"` in `/etc/docker/daemon.json`. journald then adds a `CONTAINER_NAME` field.
+
+### 5.4 Time
+
+- Run `chrony` and check that `timedatectl` reports `System clock synchronized: yes`.
+- Store **UTC with an explicit offset** everywhere. Outcome linkage joins events across systems, so clock drift there means wrong conclusions.
+
+### 5.5 Optional: forward ops and security logs to the hospital SIEM
+
+```
+# /etc/rsyslog.d/60-forward.conf  (CA/cert globals also required; see rsyslog TLS docs)
+*.* action(type="omfwd" target="siem.hospital.local" port="6514" protocol="tcp"
+           StreamDriver="gtls" StreamDriverMode="1" StreamDriverAuthMode="x509/name")
+```
+
+### 5.6 Security plane basics
+
+```
+# /etc/audit/rules.d/50-ramaai.rules
+-w /etc/ramaai/ -p wa -k ramaai_config        # config and secret changes
+-w /opt/ramaai/models/ -p wa -k ramaai_model  # model weights replaced?
+```
+
+- Query with `ausearch -k ramaai_model -i`.
+- For **reads of the MedLog database**, use DB-level audit (for example `pgAudit` on PostgreSQL) plus the collector's own access log. A file watch on the DB directory produces mostly noise.
+
+---
+
+## 6. MedLog in brief
+
+**What it is.** MedLog is a protocol for **event-level logging of clinical AI**. Every time a model is invoked (by a human, by another algorithm, or by a scheduled or automatic job), **one record** is created.
+
+It is modelled on syslog. It fills the gap left by model cards and datasheets: those describe a model *before* deployment, while MedLog records what happens *during* deployment.
+
+### 6.1 The nine fields
+
+| # | Field (paper) | Holds |
+|---|---|---|
+| 1 | Header | Protocol version, event ID, timestamp, system info; optional `run_id`, `parent_event_id` |
+| 2 | Model instance | Model ID and version, model-card and datasheet URLs, training/RAG data version |
+| 3 | User identity | Who or what invoked the model: a clinician, a service, or another AI. Immediate caller, plus the upstream chain |
+| 4 | Target identity | What the output is *about*, such as a patient or a document |
+| 5 | Inputs | Prompt or structured data, or a **pointer** for bulky data such as imaging |
+| 6 | Internal artifacts | Uncertainty, saliency/heatmaps, reasoning traces. **Optional**, governed by a capture policy |
+| 7 | Outputs | What the human actually saw: score, text, overlay, triage flag |
+| 8 | Outcomes | Clinical action and observed result, linked later |
+| 9 | User feedback | Rating, thumbs, free text |
+
+### 6.2 Three shapes, all called "MedLog". Do not blend them.
+
+| Shape | Where you meet it | Use it for |
+|---|---|---|
+| **A. Paper prose**: one record, 9 fields, field 1 is "Header" | arXiv paper, figures | Explaining and citing |
+| **B. Wire (OpenAPI 0.0.1)**: **five write-once events**, envelope flattened onto each event, **no `header` key** | `openapi.yaml` | **Implementing (this app)** |
+| **C. Pilot code**: one nested JSON blob with a `header` object and ad-hoc keys | `mims-harvard/MedLog` repo | Reading the pilots only. It validates against nothing |
+
+### 6.3 Records are assembled incrementally
+
+```
+t0  POST /event/inference-start    model_instance + user_identity + target_identity + inputs
+                                   (creates event_id E1; a record now exists even if the model crashes)
+t1  POST /event/internal-artifact  heatmap / uncertainty            parent_event_id = E1
+t2  POST /event/human-output       what the radiologist saw         parent_event_id = E1
+t3  POST /event/outcome            final report agrees? (hours/days later)   parent_event_id = E1
+t4  POST /event/user-feedback      thumbs / rating                  parent_event_id = E1
+    every event: its own new event_id; the same run_id across one run
+```
+
+### 6.4 syslog vs MedLog
+
+| | syslog | MedLog |
+|---|---|---|
+| Purpose | Event messages to a central log server | Event-level logging of clinical AI |
+| Users | IT and security | Clinicians, AI/ML engineers, safety regulators |
+| Granularity | One record per event | One record per **model invocation** |
+| Privacy | Clear text, no default encryption | Contains PHI; **encryption required** |
+| Volume | KB–GB/day per hospital | GB–TB/day per hospital |
+
+---
+
+## 7. Requirements for this app
+
+### 7.1 MUST: protocol conformance
+
+| ID | Requirement | Source |
+|---|---|---|
+| ML-M01 | Create **one MedLog record per model invocation**, including automatic and PACS-triggered runs and every model in a multi-model pipeline | [PAPER] |
+| ML-M02 | Every event carries `medlog_version: "0.0.1"`. The spec's `example: '1.0'` is an upstream defect | [SPEC][PAPER] |
+| ML-M03 | Every event carries the four required envelope fields: `event_id` (UUID, new per event), `timestamp` (RFC 3339 date-time **with offset**), `medlog_version`, `system_metadata` (object; fill in `hostname`, `app_name`, `proc_id`, and `latency_ms` where useful) | [SPEC] |
+| ML-M04 | Envelope fields sit at the **top level** of each event. **No `header` object on the wire** | [SPEC] |
+| ML-M05 | `inference-start` includes all four objects: `model_instance`, `user_identity`, `target_identity`, `inputs` | [SPEC] |
+| ML-M06 | Required payload fields: `artifact.artifact_type` + `artifact_uri`; `output.output_type` + `output_uri`; `outcome.outcome_type`; `feedback.feedback_type`. `rating_value` is 0–5. All `*_uri` values are **absolute URIs**. `run_id` / `parent_event_id` are UUIDs | [SPEC] |
+| ML-M07 | Enum values copied **verbatim** from Appendix A. Enums are closed | [SPEC] |
+| ML-M08 | Events are **write-once**. Never update or delete a posted event | [SPEC] |
+| ML-M09 | Minimum conformance profile = **Header + Model instance + Outputs**. Target: the full profile (§7.4) | [PAPER] |
+| ML-M10 | Records contain PHI, so **encryption is required**: TLS in transit, plus encryption at rest (see R-12) | [PAPER] |
+| ML-M11 | Authenticate to the collector with the `X-API-Key` header. Load the key from a secret store or environment, **never hard-coded** | [SPEC] |
+
+### 7.2 SHOULD: MedLog design guidance
+
+| ID | Requirement | Source |
+|---|---|---|
+| ML-S01 | Post `inference-start` **before** invoking the model, so failed inferences are recorded | [PAPER] |
+| ML-S02 | Instrument at a **chokepoint** (gateway, DICOM router or sidecar) without modifying the model | [PAPER] |
+| ML-S03 | Log at least the **immediate caller**. Record upstream initiators as a provenance chain (modality → PACS rule → router) | [PAPER] |
+| ML-S04 | Reference bulky inputs (imaging) by a **stable pointer**, not by content | [PAPER] |
+| ML-S05 | Outputs = **what the human saw**, including any triage level or score that flags a study for review | [PAPER] |
+| ML-S06 | Link outcomes with a **separate delayed job**. Partial linkage still has value. Record the *strength* of the linkage | [PAPER] |
+| ML-S07 | Set an explicit **capture policy** for internal artifacts: continuous, random sampling, risk-triggered, or enhanced after updates | [PAPER] |
+| ML-S08 | **Store references, not raw content.** The AI output that informed care lives in PACS/EHR, and MedLog holds a pointer. This keeps MedLog outside the legal medical record | [PAPER] |
+| ML-S09 | Run the collector **inside the hospital firewall** with EHR-class controls: RBAC, **audit of access to the logs themselves**, pseudonymous identifiers | [PAPER] |
+| ML-S10 | Retention: **full tracing** during the pilot and after major model updates; **sampling or risk-triggered** tracing in steady state; **tiered** (long-lived summaries, shorter-lived detail) | [PAPER] |
+| ML-S11 | Emitter failures must **not take down inference**. Queue locally and retry (write-behind) | [PAPER] |
+| ML-S12 | Governance: a named owner, a defined review workflow, strong clinician (radiologist) representation, framed as clinical learning rather than surveillance of staff | [PAPER] |
+| ML-S13 | Reuse standards where they fit: FHIR (`AuditEvent`, `Patient`, `Observation`, `Practitioner`), W3C PROV, OpenTelemetry | [PAPER] |
+
+### 7.3 RECOMMENDED: design choices for this app
+
+| ID | Recommendation | Source |
+|---|---|---|
+| R-01 | Keep the three planes separate (§3). **No PHI in journald/syslog.** Correlate by `event_id`/`run_id` | [REC] |
+| R-02 | Set `model_version` = released SaMD version + weights hash, e.g. `2.3.1+weights.sha256-9f2c41e0`. It must match the QMS release/change record. `model_card_url` points to the controlled document | [REC] |
+| R-03 | Log the **operating point** (decision threshold, triage rule version) with each inference. The same weights at a different threshold behave like a different device | [REC] |
+| R-04 | Use one `run_id` per study per pipeline execution. Each model in the pipeline (e.g. detector → classifier) gets its own `inference-start` sharing that `run_id`, with `parent_event_id` set to the upstream event | [REC] |
+| R-05 | Set `target_id` to a **keyed pseudonym** of the HN, e.g. `pid-` + HMAC-SHA256(HN, secret)[:16]. The key is held by the hospital, and re-identification is only possible under access control | [REC] |
+| R-06 | URIs: use DICOMweb URLs (`https://pacs…/dicom-web/studies/<StudyUID>`) or `urn:oid:<UID>` for inputs and SR outputs | [REC] |
+| R-07 | Put **non-identifying acquisition metadata** under one namespaced extension object `inputs.x_ramaai`: modality, body part, view, manufacturer, scanner model, protocol, slice thickness, kVp, pixel spacing. This enables dataset-shift detection. The 0.0.1 schema does not forbid extra keys, but check that your collector accepts them | [REC] |
+| R-08 | **Failure signalling:** the spec has no failure event. An `inference-start` with no `human-output` means "no result delivered". Optionally post an `internal-artifact` with `artifact_type: "other"`, a `description` such as `inference_error:GPU_OOM`, and an `artifact_uri` pointing at the incident or ops query. See §20 Q11 | [REC] |
+| R-09 | `human-output` timing: post it when the result is **delivered to the PACS viewer or worklist**, and say so in `summary`. If the viewer can report "opened/viewed", post it then instead. See §20 Q4 | [REC] |
+| R-10 | **Idempotency:** the client keeps the same `event_id` across retries, and the collector treats a duplicate `event_id` as already accepted (returns 201) | [REC] |
+| R-11 | Enforce **append-only at the DB layer**: the writer role has INSERT only, with no UPDATE or DELETE. Optional tamper evidence: periodic hash of the day's events stored elsewhere | [REC] |
+| R-12 | At-rest encryption: put the MedLog DB on an encrypted volume (LUKS) or use DB-native encryption. Back it up encrypted. Run the collector on a separate service and DB from the app, ideally a separate host or VM | [REC] |
+| R-13 | Keep **environments separate**: test and validation runs never go to the production collector (or are clearly tagged via `system_metadata.app_name`) | [REC] |
+| R-14 | **Monitor the logger itself:** alert on outbox backlog growth, any parked (400-rejected) events, and the share of `inference-start` events with no `human-output` | [REC] |
+| R-15 | Put `latency_ms` on `human-output` (time from study receipt to result delivered). Time-to-result is a clinically relevant performance measure for triage | [REC] |
+
+### 7.4 Conformance profile target
+
+| Field | Minimum (must) | Phase 1 target | Phase 2 target | Typical gap to avoid |
+|---|:---:|:---:|:---:|---|
+| Header (envelope) | ✅ | ✅ | ✅ | Missing `medlog_version`, non-UUID IDs |
+| Model instance | ✅ | ✅ | ✅ | **Version not logged** (the most common gap) |
+| User identity | | ✅ | ✅ | Only the service account, no human or upstream chain |
+| Target identity | | ✅ | ✅ | Raw HN instead of a pseudonym |
+| Inputs | | ✅ | ✅ | No pointer; no acquisition metadata |
+| Internal artifacts | | sampled | policy-driven | Storing every heatmap forever |
+| Outputs | ✅ | ✅ | ✅ | Raw score only, not what was displayed |
+| Outcomes | | | ✅ | No linkage job |
+| User feedback | | | ✅ | No UI to collect it |
+
+---
+
+## 8. Field mapping for a PACS AI workflow
+
+| MedLog field | Wire key | Value for this app | Example |
+|---|---|---|---|
+| Envelope | top-level | UUIDs, UTC timestamp, version, host and app | see §10 |
+| Model instance | `model_instance.model_id` | Product/model name | `ramaai-cxr-triage` |
+| | `model_instance.model_version` | Release + weights hash (R-02) | `2.3.1+weights.sha256-9f2c41e0` |
+| | `model_instance.model_card_url` | Controlled model card or IFU | `https://qms.hospital.local/models/…/card` |
+| User identity | `user_identity.caller_type` | `service` (auto-route) or `clinician` (on-demand) | `service` |
+| | `user_identity.caller_id` | Router/AE title, or the radiologist's staff ID | `dicom-router/AE:RAMAAI_SCP` |
+| Target identity | `target_identity.target_type` | `patient` | `patient` |
+| | `target_identity.target_id` | Keyed pseudonym (R-05) | `pid-7c1e9a52` |
+| Inputs | `inputs.input_uri` | Study pointer (R-06) | `https://pacs…/dicom-web/studies/1.2.840…` |
+| | `inputs.x_ramaai` | Acquisition metadata, operating point (R-03, R-07) | `{"modality":"CR","manufacturer":"VendorX",…}` |
+| Internal artifacts | `artifact.artifact_type` | `explanation` (heatmap/saliency), `other` (uncertainty, error) | `explanation` |
+| | `artifact.artifact_uri` | Pointer to the stored heatmap | `https://medlog-store…/heatmap/3b1f.png` |
+| Outputs | `output.output_type` | `text` (SR findings) or `image` (overlay / secondary capture) | `text` |
+| | `output.output_uri` | SR/SC SOP Instance as `urn:oid:` or DICOMweb | `urn:oid:1.2.826.0.1.…` |
+| | `output.summary` | **Exactly what was displayed**, plus the triage flag | `Suspected pneumothorax, right. p=0.91. URGENT` |
+| Outcomes | `outcome.outcome_type` | From the comparison with the final report (§13) | `validated` |
+| User feedback | `feedback.feedback_type` | `thumbs` / `rating` / `text` | `thumbs` |
+
+---
+
+## 9. Event lifecycle for one study
+
+```
+Modality   PACS        AI gateway/router         AI model     MedLog collector      RIS (later)
+  │C-STORE  │                 │                       │               │                    │
+  │────────►│  auto-route     │                       │               │                    │
+  │         │────────────────►│ ① inference-start ───────────────────►│ (outbox → POST)    │
+  │         │                 │── run ───────────────►│               │                    │
+  │         │                 │◄── result ────────────│               │                    │
+  │         │                 │ ② internal-artifact ─────────────────►│ (per capture policy)│
+  │         │◄─ SR / overlay ─│ ③ human-output ──────────────────────►│                    │
+  │         │  radiologist reads, signs final report ─────────────────────────────────────►│
+  │         │                 │       ④ outcome job (hours–days) ────►│◄── final report ───│
+  │         │  viewer 👍/👎 ──────────► ⑤ user-feedback ─────────────►│                    │
+```
+
+- **Failure path:** ① is posted, then the model errors. No ③ follows. An ops log entry with the same `medlog_event_id` holds the technical detail, and optionally an `internal-artifact` of type `other` (R-08).
+- **Multi-model pipeline:** each model gets its own ①, all sharing one `run_id`. The downstream model's `parent_event_id` points at the upstream model's ①.
+
+---
+
+## 10. Worked example payloads (wire shape, validated against 0.0.1)
+
+All identifiers are synthetic. `…(uuid)` marks a placeholder for a freshly generated UUID. Payload ① is shown in full and validates as-is; ②–⑤ validate once real UUIDs are filled in.
+
+**① `POST /event/inference-start`**
+
+```json
+{
+  "event_id": "0b6f6c55-2f0e-4c7e-9d0e-6a3c9e2b7a11",
+  "timestamp": "2026-11-15T03:41:05.120+00:00",
+  "medlog_version": "0.0.1",
+  "system_metadata": { "hostname": "ai-srv-01", "app_name": "ramaai-cxr", "proc_id": "41233" },
+  "run_id": "6c0d3f8e-8a51-4c43-b1e4-2f8f6b0b9d21",
+  "model_instance": {
+    "model_id": "ramaai-cxr-triage",
+    "model_version": "2.3.1+weights.sha256-9f2c41e0",
+    "model_card_url": "https://qms.hospital.local/models/ramaai-cxr-triage/2.3.1/card"
+  },
+  "user_identity": { "caller_type": "service", "caller_id": "dicom-router/AE:RAMAAI_SCP" },
+  "target_identity": { "target_type": "patient", "target_id": "pid-7c1e9a52" },
+  "inputs": {
+    "input_uri": "https://pacs.hospital.local/dicom-web/studies/1.2.840.113619.2.55.3.604688119.971.1700000000.123",
+    "x_ramaai": {
+      "modality": "CR", "body_part": "CHEST", "view": "PA",
+      "manufacturer": "VendorX", "series_count": 1, "instance_count": 1,
+      "operating_point": "triage-v4@0.62"
+    }
+  }
+}
+```
+
+**② `POST /event/internal-artifact`**
+
+```json
+{
+  "event_id": "c3d2…(uuid)", "timestamp": "2026-11-15T03:41:06.880+00:00",
+  "medlog_version": "0.0.1", "system_metadata": { "hostname": "ai-srv-01", "app_name": "ramaai-cxr", "proc_id": "41233" },
+  "run_id": "6c0d3f8e-8a51-4c43-b1e4-2f8f6b0b9d21",
+  "parent_event_id": "0b6f6c55-2f0e-4c7e-9d0e-6a3c9e2b7a11",
+  "artifact": {
+    "artifact_type": "explanation",
+    "artifact_uri": "https://medlog-store.hospital.local/artifacts/heatmap/3b1f.png",
+    "mime_type": "image/png",
+    "description": "Grad-CAM heatmap; predictive entropy 0.18"
+  }
+}
+```
+
+**③ `POST /event/human-output`**
+
+```json
+{
+  "event_id": "…(uuid)", "timestamp": "2026-11-15T03:41:06.960+00:00",
+  "medlog_version": "0.0.1",
+  "system_metadata": { "hostname": "ai-srv-01", "app_name": "ramaai-cxr", "proc_id": "41233", "latency_ms": 1840 },
+  "run_id": "6c0d3f8e-8a51-4c43-b1e4-2f8f6b0b9d21",
+  "parent_event_id": "0b6f6c55-2f0e-4c7e-9d0e-6a3c9e2b7a11",
+  "output": {
+    "output_type": "text",
+    "output_uri": "urn:oid:1.2.826.0.1.3680043.10.543.1700000000.9",
+    "summary": "Suspected pneumothorax, right. Probability 0.91. Triage: URGENT"
+  }
+}
+```
+
+**④ `POST /event/outcome`** (posted later by the linkage job)
+
+```json
+{
+  "event_id": "…(uuid)", "timestamp": "2026-11-15T04:10:00.000+00:00",
+  "medlog_version": "0.0.1", "system_metadata": { "hostname": "ai-srv-01", "app_name": "ramaai-outcome-linker" },
+  "run_id": "6c0d3f8e-8a51-4c43-b1e4-2f8f6b0b9d21",
+  "parent_event_id": "0b6f6c55-2f0e-4c7e-9d0e-6a3c9e2b7a11",
+  "outcome": {
+    "outcome_type": "validated",
+    "occurred_at": "2026-11-15T10:42:00+07:00",
+    "description": "Final radiologist report confirms right pneumothorax. Linkage: direct (same accession). Judged by: report-parser v1.0",
+    "evidence_uri": "https://ris.hospital.local/reports/ACC-REDACTED"
+  }
+}
+```
+
+**⑤ `POST /event/user-feedback`**
+
+```json
+{
+  "event_id": "…(uuid)", "timestamp": "2026-11-15T03:52:30.000+00:00",
+  "medlog_version": "0.0.1", "system_metadata": { "hostname": "ai-srv-01", "app_name": "ramaai-viewer-plugin" },
+  "run_id": "6c0d3f8e-8a51-4c43-b1e4-2f8f6b0b9d21",
+  "parent_event_id": "0b6f6c55-2f0e-4c7e-9d0e-6a3c9e2b7a11",
+  "feedback": { "feedback_type": "thumbs", "rating_value": 5, "comment": "Correct and timely" }
+}
+```
+
+---
+
+## 11. Reference emitter (Python, write-behind outbox)
+
+This emitter satisfies ML-S11 and R-10.
+
+- Events are first written to a local SQLite outbox, then flushed by a background thread.
+- Network errors, 401/403 and 5xx responses retry with exponential backoff (up to 5 minutes).
+- A **400** (invalid payload) is *parked* for human review instead of being retried forever.
+- The `event_id` is frozen at enqueue, so retries are idempotent.
+
+It was tested against a mock collector that validates every request with the 0.0.1 JSON schemas. The test covered all five example events, a simulated outage, de-duplication, and 400-parking.
+
+```python
+"""Reference MedLog 0.0.1 emitter with a write-behind (outbox) queue."""
+from __future__ import annotations
+
+import json, logging, os, socket, sqlite3, threading, time, uuid
+from datetime import datetime, timezone
+from typing import Any
+
+import requests
+
+MEDLOG_VERSION = "0.0.1"  # NOT "1.0" (that is a defect in the spec's example)
+ENDPOINTS = {"inference-start", "internal-artifact", "human-output", "outcome", "user-feedback"}
+log = logging.getLogger("medlog")  # ops-plane logger: never put PHI in here
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+
+class MedLogEmitter:
+    def __init__(self, base_url: str, api_key: str, outbox_path: str, app_name: str,
+                 timeout_s: float = 5.0, flush_interval_s: float = 2.0) -> None:
+        self._base, self._timeout, self._interval = base_url.rstrip("/"), timeout_s, flush_interval_s
+        self._app_name, self._hostname = app_name, socket.gethostname()
+        self._session = requests.Session()
+        self._session.headers["X-API-Key"] = api_key          # from a secret store / env
+        self._db_lock = threading.Lock()
+        self._db = sqlite3.connect(outbox_path, check_same_thread=False)
+        self._db.execute("PRAGMA journal_mode=WAL")
+        self._db.execute("""CREATE TABLE IF NOT EXISTS outbox (
+            event_id TEXT PRIMARY KEY, endpoint TEXT NOT NULL, body TEXT NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0, next_try REAL NOT NULL DEFAULT 0)""")
+        self._db.commit()
+        self._stop = threading.Event()
+        self._worker = threading.Thread(target=self._run, name="medlog-flush", daemon=True)
+        self._worker.start()
+
+    def envelope(self, run_id: str | None = None, parent_event_id: str | None = None,
+                 latency_ms: int | None = None) -> dict[str, Any]:
+        """BaseEvent: the four required fields plus optional linkage."""
+        meta: dict[str, Any] = {"hostname": self._hostname, "app_name": self._app_name,
+                                "proc_id": str(os.getpid())}
+        if latency_ms is not None:
+            meta["latency_ms"] = int(latency_ms)
+        env: dict[str, Any] = {"event_id": str(uuid.uuid4()), "timestamp": utc_now(),
+                               "medlog_version": MEDLOG_VERSION, "system_metadata": meta}
+        if run_id:
+            env["run_id"] = run_id
+        if parent_event_id:
+            env["parent_event_id"] = parent_event_id
+        return env
+
+    def emit(self, endpoint: str, body: dict[str, Any]) -> str:
+        """Durably enqueue one event; returns its event_id. Never raises on network problems."""
+        if endpoint not in ENDPOINTS:
+            raise ValueError(f"unknown MedLog endpoint: {endpoint}")
+        with self._db_lock:
+            self._db.execute("INSERT OR IGNORE INTO outbox(event_id, endpoint, body) VALUES (?,?,?)",
+                             (body["event_id"], endpoint, json.dumps(body, separators=(",", ":"))))
+            self._db.commit()
+        return body["event_id"]
+
+    def flush_once(self) -> int:
+        with self._db_lock:
+            rows = self._db.execute("SELECT event_id, endpoint, body, attempts FROM outbox "
+                                    "WHERE next_try <= ? ORDER BY rowid LIMIT 100",
+                                    (time.time(),)).fetchall()
+        sent = 0
+        for event_id, endpoint, body, attempts in rows:
+            try:
+                status = self._session.post(f"{self._base}/event/{endpoint}", data=body,
+                                            headers={"Content-Type": "application/json"},
+                                            timeout=self._timeout).status_code
+            except requests.RequestException as exc:
+                status = None
+                log.warning("medlog send failed event_id=%s err=%s", event_id, type(exc).__name__)
+            if status == 201:
+                self._exec("DELETE FROM outbox WHERE event_id=?", (event_id,)); sent += 1
+            elif status == 400:   # will never succeed: park for a human, don't loop
+                log.error("medlog rejected event_id=%s endpoint=%s (400)", event_id, endpoint)
+                self._exec("UPDATE outbox SET next_try=? WHERE event_id=?", (float("inf"), event_id))
+            else:                 # network error, 401/403 (config), 5xx: retry with backoff
+                delay = min(300.0, 2.0 ** min(attempts, 8))
+                self._exec("UPDATE outbox SET attempts=attempts+1, next_try=? WHERE event_id=?",
+                           (time.time() + delay, event_id))
+        return sent
+
+    def pending(self) -> int:
+        with self._db_lock:
+            return self._db.execute("SELECT COUNT(*) FROM outbox").fetchone()[0]
+
+    def _exec(self, sql: str, args: tuple) -> None:
+        with self._db_lock:
+            self._db.execute(sql, args); self._db.commit()
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval):
+            try:
+                self.flush_once()
+            except Exception:
+                log.exception("medlog flush loop error")   # the flusher must never die silently
+
+    def close(self) -> None:
+        self._stop.set(); self._worker.join(timeout=5); self.flush_once(); self._db.close()
+```
+
+**Wiring it into the inference path** (at the gateway, ML-S01/ML-S02):
+
+```python
+em = MedLogEmitter(BASE_URL, os.environ["MEDLOG_API_KEY"], "/var/lib/ramaai/medlog-outbox.db",
+                   app_name="ramaai-cxr")
+
+def handle_study(study, caller):
+    run_id = str(uuid.uuid4())
+    start = em.envelope(run_id=run_id) | {
+        "model_instance": MODEL_INSTANCE,                      # constant per release (R-02)
+        "user_identity": caller,                               # service or clinician
+        "target_identity": {"target_type": "patient", "target_id": pseudonym(study.hn)},
+        "inputs": {"input_uri": dicomweb_url(study.uid), "x_ramaai": acquisition_meta(study)},
+    }
+    e1 = em.emit("inference-start", start)                     # BEFORE the model runs
+    t0 = time.monotonic()
+    try:
+        result = model.predict(study)
+    except Exception as exc:
+        ops_log.error("inference failed", extra={"medlog_event_id": e1, "error": type(exc).__name__})
+        raise
+    sr_uid = publish_to_pacs(result)                           # what the radiologist will see
+    em.emit("human-output", em.envelope(run_id=run_id, parent_event_id=e1,
+                                        latency_ms=int((time.monotonic() - t0) * 1000)) | {
+        "output": {"output_type": "text", "output_uri": f"urn:oid:{sr_uid}",
+                   "summary": result.display_text},
+    })
+```
+
+> The outbox lives on the app server and **contains PHI** until it is flushed. Put it on an encrypted volume, with permissions `0600` owned by the service user.
+
+---
+
+## 12. Collector design `[REC]`
+
+MedLog is deployed **inside the institution**. The servers listed in the spec (a SwaggerHub mock and `medlog.swagger.io`) are **not** production collectors, so you build your own.
+
+**Endpoints:** the five `POST /event/*` routes.
+
+**Responses:**
+- `201` accepted, including a duplicate `event_id`
+- `400` invalid payload
+- `401` missing or invalid key
+- `403` insufficient permissions
+- Errors return `{ "message", "code", "details" }`
+
+**Validation:** validate every body against the OpenAPI 0.0.1 schemas, and reject anything that doesn't conform.
+
+**Storage sketch (PostgreSQL):**
+
+```sql
+CREATE TABLE medlog_event (
+  event_id        uuid PRIMARY KEY,
+  event_kind      text NOT NULL CHECK (event_kind IN
+                    ('inference-start','internal-artifact','human-output','outcome','user-feedback')),
+  run_id          uuid,
+  parent_event_id uuid,          -- no FK: events can arrive out of order after retries
+  ts              timestamptz NOT NULL,
+  medlog_version  text NOT NULL,
+  body            jsonb NOT NULL,
+  received_at     timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ON medlog_event (run_id);
+CREATE INDEX ON medlog_event (parent_event_id);
+CREATE INDEX ON medlog_event (ts);
+
+-- append-only (R-11): writer can only INSERT; duplicates via ON CONFLICT (event_id) DO NOTHING
+REVOKE ALL ON medlog_event FROM medlog_writer;
+GRANT INSERT ON medlog_event TO medlog_writer;
+-- analysts read through views that hide or pseudonymise fields; pgAudit logs their reads (ML-S09)
+```
+
+**Security:**
+- TLS on the collector, with an API key per emitting service (rotate the keys).
+- An encrypted DB volume and encrypted backups.
+- Firewall rules so that only the app servers can reach the collector.
+
+**Read paths:** build a **view per audience**:
+- Radiologist review: case-level, with re-identification on demand via an access-controlled pseudonym map.
+- AI/ML team: pseudonymised.
+- Regulators and multi-site work: de-identified or aggregated.
+
+---
+
+## 13. Outcome linkage and feedback
+
+**Outcome linkage** is the hardest part. It lives outside the AI workflow and arrives late. Build it as a scheduled job (for example nightly) that:
+
+1. Finds `inference-start` events from the last *N* days with no `outcome`.
+2. Fetches the final report (by accession) from RIS.
+3. Compares it with the AI output.
+4. Posts `/event/outcome` with `parent_event_id` = the original `inference-start`.
+
+| `outcome_type` | Radiology meaning (proposed) |
+|---|---|
+| `validated` | The final report agrees with the AI output: a confirmed positive, or a confirmed negative |
+| `contradicted` | The final report disagrees (false positive or false negative) |
+| `partial` | Partly agrees: multi-finding case with some matches, or the right finding with the wrong side or size category |
+| `unknown` | No final report yet, the report is ambiguous, or no ground truth is available |
+
+- **Run it for AI-negative studies too.** Otherwise false negatives are invisible.
+- Put the **linkage source and strength** in `description`: direct (same accession) vs temporal; final report vs addendum vs pathology vs follow-up. Also say **who or what judged** it (a radiologist, or report-parser vX).
+- If an NLP/LLM model judges agreement, that model is itself an AI invocation. Give it its own MedLog record (an AI-AI pattern with `parent_event_id`).
+- Pathology and follow-up imaging can arrive weeks later. Post a later, stronger `outcome` as a **new event**; the earlier one is never edited.
+
+**Feedback:**
+- Best: thumbs or a 0–5 rating inside the viewer.
+- If the PACS viewer is closed to plugins, use a small web form keyed by accession, or a field in the reporting template.
+- Feedback is voluntary and biased, so treat it as a signal, not ground truth.
+
+---
+
+## 14. Privacy, security and access audit
+
+- **Classify the MedLog store as EHR-class.** Under Thai PDPA, health data is sensitive personal data. The MedLog paper names HIPAA, HITECH, GDPR and ISO/IEC 27001 as the comparable regimes.
+- **Pseudonymise** the target (R-05) and **minimise**: pointers instead of content (ML-S04, ML-S08).
+- **RBAC** by audience (§12). **Log every read** of the MedLog store (ML-S09).
+- **Keep it local, behind the firewall.** Cross-site sharing only on de-identified or aggregated data (federated or secure computation).
+- **Vendor/IP risk:** large volumes of input–output pairs and uncertainty data enable model-extraction and membership-inference attacks. This matters if a third-party model is ever added, and it matters for your own IP too. Restrict detailed-artifact access accordingly.
+- **The outbox and ops logs are part of the attack surface.** The outbox is encrypted and permission-restricted. Ops logs are PHI-free by design (§5.3).
+
+---
+
+## 15. Storage, volume and retention
+
+Estimate volume from **invocations per day**, not patient count:
+
+```
+events/day ≈ studies/day × model invocations/study × events/invocation
+bytes/day  ≈ events/day × ~1–2 KB  (+ artifact files, if stored)
+```
+
+*Illustrative (assumed numbers):* 300 CXR/day × 1 model × 4 events ≈ 1,200 events/day ≈ 2 MB/day ≈ 0.7 GB/year of event data. If every heatmap PNG (~100 KB) were kept, that adds ≈ 30 MB/day, about 11 GB/year. **Artifacts are where cost concentrates**, so set the capture policy (ML-S07):
+
+| Phase | Internal artifacts | Events |
+|---|---|---|
+| Pilot / first weeks after a model update | 100% (full tracing) | 100% |
+| Steady state | Random sample (e.g. 5–10%) **plus** risk-triggered: all `contradicted`, all urgent triage, all high-uncertainty | 100% |
+| Archive | Delete detailed artifacts after *X* months; keep summaries long-term | Keep per the QMS record-retention policy |
+
+Retention periods (*X*, archive length) must be set with the QA/RA owner and the hospital policy. Do not use logrotate for this.
+
+---
+
+## 16. Using the logs: what they buy you
+
+Metrics that fall straight out of the records:
+
+- **Reliability:** failure rate (inference-start with no human-output), outbox backlog, p50/p95 `latency_ms`.
+- **Performance in the real world:** the validated / contradicted / partial rate, overall and **by scanner manufacturer, protocol, site and time of day**.
+- **Dataset shift:** distributions of `x_ramaai` acquisition metadata and of output scores over time. A changed scanner or protocol shows up here before it shows up in complaints.
+- **Workflow effect:** time-to-result for urgent triage, and alert rates by hour (alarm fatigue).
+- **Change impact:** before and after each `model_version`, using the full-tracing window after updates.
+
+What the published MedLog pilots demonstrated:
+- Quantifying clinician complaints about alarm timing
+- Finding a failure mode invisible at the bedside: risk falling as labs got older
+- Measuring output consistency by re-running inference, with each call logged under one `run_id`
+- Detecting a dataset shift caused by a lab changing test kits
+
+---
+
+## 17. Regulatory context: outside MedLog, verify with QA/RA
+
+MedLog is a **pre-1.0 research protocol, not a regulation**. It is a good *mechanism* for obligations that come from elsewhere. Pointers to discuss with your QA/RA, not checked in detail here:
+
+- **Post-market surveillance and feedback:** ISO 13485 (QMS), ISO 14971 (risk management, using production and post-production information), and Thai FDA medical-device requirements. MedLog outcomes and feedback are evidence for these.
+- **Software maintenance and problem resolution:** IEC 62304. Link every complaint, incident or change request to the relevant `event_id`s / `run_id`s and `model_version`, for example in your feedback/complaint and change-request records.
+- **Security of health software:** IEC 81001-5-1, together with the hospital's ISO/IEC 27001-style controls (§14).
+- **Data protection:** Thai PDPA (lawful basis, minimisation, retention, access rights).
+
+---
+
+## 18. Pitfalls and traps
+
+| Trap | Correct behaviour |
+|---|---|
+| Sending a nested `header` object | Envelope fields go at the **top level** of every event |
+| `medlog_version: "1.0"` (from the spec's example) | `"0.0.1"` |
+| Numeric event IDs like `43782` (paper examples) | UUIDs on the wire |
+| Timestamps without an offset (`2026-01-10T05:31:19` in a pilot figure) | RFC 3339 **with offset**, preferably UTC |
+| Inventing enum values (`"doctor"`, `"radiologist"`, `"dicom"`) | `clinician`; `image`/`text`/`other`; see Appendix A |
+| Adding syslog fields (`severity`, `facility`, `PRI`, `MSGID`) | Not MedLog fields. The analogy is architectural |
+| Copying pilot code (shape C) as the wire format | The pilots validate against nothing. Use the OpenAPI shape |
+| Relative or bare-ID URIs (`3b1f.png`, a bare StudyUID) | Absolute URIs: `https://…` or `urn:oid:…` |
+| Putting HN or StudyUID in ops logs "for debugging" | Use `medlog_event_id`; look it up in MedLog under access control |
+| Logging only the raw score | Log what was **displayed**, plus the triage flag |
+| Updating an outcome in place | Post a new `outcome` event; events are write-once |
+| Concluding "no spec exists" from a fresh clone of `mims-harvard/MedLog` | The spec is not on `main`. The live site is canonical |
+| Letting logging failures fail the inference | Outbox and retry; inference proceeds |
+
+---
+
+## 19. Conformance checklist (for reviews and PRs)
+
+**Envelope**
+- [ ] Every event has `event_id` (a new UUID), `timestamp` (with offset), `medlog_version: "0.0.1"`, `system_metadata`
+- [ ] No `header` object; `run_id` and `parent_event_id` are UUIDs where used
+
+**Inference-start**
+- [ ] Posted before model invocation (also on the failure path)
+- [ ] `model_instance.model_id` and `model_version` present; the version matches the release record
+- [ ] `user_identity.caller_type` is valid; `caller_id` is set; the upstream chain is recorded where known
+- [ ] `target_identity` is a pseudonym, not a raw HN
+- [ ] `inputs.input_uri` is an absolute pointer; no pixels; acquisition metadata present
+
+**Outputs / artifacts / outcomes / feedback**
+- [ ] `human-output.summary` equals what the radiologist saw, including the triage flag
+- [ ] Artifacts follow the documented capture policy
+- [ ] The outcome job covers AI-positive **and** AI-negative studies; linkage strength is recorded
+- [ ] Feedback events use valid enums; `rating_value` is 0–5
+
+**Operations and security**
+- [ ] Outbox is durable, encrypted, `0600`; retry with backoff; 400s parked and alerted
+- [ ] No PHI in journald (grep test on staging logs)
+- [ ] Collector uses TLS, API keys from a secret store, INSERT-only writer role, an encrypted volume, and audited reads
+- [ ] Production and test collectors are separate
+- [ ] Time sync verified (`timedatectl`)
+- [ ] Retention policy documented and implemented (not logrotate)
+
+---
+
+## 20. Open design questions (decide with KS and the hospital)
+
+1. **Trigger modes:** auto-route only, on-demand only, or both? This sets `caller_type` and `caller_id`.
+2. **PACS interface:** DIMSE, DICOMweb, or both? This sets the URI scheme.
+3. **What does the radiologist see?** SR text, an overlay or secondary capture, a worklist flag? This sets `output_type` and `summary`.
+4. **Can we know when a result was viewed?** If not, `human-output` = "delivered" (R-09).
+5. **Ground truth access:** how to get final reports from RIS/HIS, and who judges agreement (a rule, NLP, or a radiologist)?
+6. **Pseudonym key custody:** who holds the HMAC key and the re-identification map?
+7. **Collector hosting:** same server as the app, or a separate VM? Which DB?
+8. **Capture policy:** sampling rate and risk triggers for heatmaps and uncertainty.
+9. **Retention periods:** the QMS record retention, the hospital policy and PDPA together.
+10. **Governance:** who reviews which events, how often, and how findings feed back into CAPA and change requests.
+11. **Failure representation:** ops-log correlation only, or also an `internal-artifact` of type `other` (R-08)?
+12. **Extension keys:** will our collector accept `inputs.x_ramaai`? Which fields go in it exactly?
+
+---
+
+## 21. Starter prompt for the coding agent
+
+```text
+You are helping me design and implement logging for a SaMD AI application that receives
+studies from PACS, runs inference on a hospital Linux server, and returns results to the
+PACS viewer. Use the attached "Logging Guidebook for a PACS-Connected SaMD AI App on Linux"
+as the specification.
+
+Rules:
+- Treat Section 7 requirement IDs (ML-Mxx = must, ML-Sxx = should, R-xx = recommended) as
+  the spec; cite IDs in code comments, commit messages and PR descriptions.
+- Implement the MedLog OpenAPI 0.0.1 WIRE shape (five write-once POST endpoints, envelope
+  fields at top level, no "header" object, medlog_version "0.0.1", closed enums from
+  Appendix A). Re-check https://medlogprotocol.ai/api-reference/openapi.yaml first.
+- Never put PHI (names, HN/MRN, accession, DICOM UIDs, report text) in application/journald
+  logs; correlate with medlog_event_id / medlog_run_id only.
+- Logging must never block or fail inference: use the write-behind outbox pattern (§11).
+- Before deciding any item in Section 20, ask me.
+
+Tasks:
+1. Read my codebase and map where studies enter, where the model is invoked, and where
+   results are published to PACS. Propose the single instrumentation chokepoint.
+2. Produce a gap analysis against the Section 19 checklist.
+3. Propose a phased plan (Phase 1: minimum + full inference-start/human-output;
+   Phase 2: artifacts capture policy, outcome-linkage job, feedback).
+4. Implement Phase 1 with tests that validate every emitted event against the 0.0.1 schema.
+```
+
+---
+
+## Appendix A: MedLog 0.0.1 enum quick reference (closed; copy verbatim)
+
+| Field | Allowed values |
+|---|---|
+| `user_identity.caller_type` | `clinician` · `patient` · `admin` · `service` |
+| `target_identity.target_type` | `patient` · `document` · `claim` · `none` |
+| `artifact.artifact_type` | `text_chunk` · `reasoning_trace` · `tool_call` · `explanation` · `other` |
+| `output.output_type` | `text` · `image` · `video` · `audio` · `other` |
+| `outcome.outcome_type` | `validated` · `contradicted` · `partial` · `unknown` |
+| `feedback.feedback_type` | `rating` · `thumbs` · `text` · `survey` |
+
+**Object fields (0.0.1)**
+
+| Object | Fields (**required** in bold) |
+|---|---|
+| BaseEvent (every event) | **`event_id`** uuid · **`timestamp`** date-time · **`medlog_version`** · **`system_metadata`** · `run_id` uuid · `parent_event_id` uuid, nullable |
+| `system_metadata` | `hostname` · `app_name` · `proc_id` · `latency_ms` (int32) |
+| `model_instance` | `model_id` · `model_version` · `model_card_url` (uri) · `data_sheet_url` (uri) |
+| `user_identity` | `caller_type` · `caller_id` |
+| `target_identity` | `target_type` · `target_id` |
+| `inputs` | `prompt` · `input_uri` (uri) |
+| `artifact` | **`artifact_type`** · **`artifact_uri`** (uri) · `mime_type` · `description` |
+| `output` | **`output_type`** · **`output_uri`** (uri) · `summary` |
+| `outcome` | **`outcome_type`** · `occurred_at` (date-time) · `description` · `evidence_uri` (uri) |
+| `feedback` | **`feedback_type`** · `rating_value` (0–5) · `comment` |
+| Error (response) | **`message`** · `code` · `details` |
+
+`InferenceStartEvent` additionally **requires** all four of `model_instance`, `user_identity`, `target_identity` and `inputs`. The other events each require their one payload object.
+
+---
+
+## Appendix B: Linux command cheat sheet
+
+| Task | Command |
+|---|---|
+| Follow the app's logs live | `journalctl -u ramaai-ai -f` |
+| Errors since the last boot | `journalctl -u ramaai-ai -p err -b` |
+| Logs for one MedLog event (native field) | `journalctl MEDLOG_EVENT_ID=<uuid>` |
+| Time window, JSON output | `journalctl -u ramaai-ai --since "2026-11-15 08:00" -o json-pretty` |
+| Journal disk usage / shrink | `journalctl --disk-usage` · `sudo journalctl --vacuum-size=2G` |
+| Kernel messages (GPU, disk, OOM) | `journalctl -k -b` or `dmesg -T` |
+| Check time sync | `timedatectl` · `chronyc tracking` |
+| Audit events for model files | `sudo ausearch -k ramaai_model -i` |
+| Test syslog path | `logger -t ramaai-test "hello"` then `journalctl -t ramaai-test` |
+| PHI leak spot-check (staging) | `journalctl -u ramaai-ai --since today \| grep -E '1\.2\.840\.\|HN[0-9]'` |
+
+---
+
+## Appendix C: Glossary
+
+| Term | Meaning |
+|---|---|
+| SaMD | Software as a Medical Device |
+| PACS / RIS / HIS | Picture Archiving and Communication System / Radiology / Hospital Information System |
+| DIMSE / DICOMweb | Classic DICOM network services (C-STORE, C-FIND, C-MOVE) / RESTful DICOM (QIDO, WADO, STOW) |
+| SR / SC / GSPS | DICOM Structured Report / Secondary Capture / Grayscale Softcopy Presentation State |
+| AE title | DICOM Application Entity name of a network node |
+| PHI | Protected health information (identifiable health data) |
+| PDPA | Thailand's Personal Data Protection Act |
+| Outbox / write-behind | Write locally first, deliver to the remote collector asynchronously |
+| `run_id` / `parent_event_id` | MedLog linkage: one run across events / the event this one expands on |
+
+---
+
+## Appendix D: Sources and provenance
+
+- MedLog paper: *A global log for medical AI*, arXiv 2510.04033. <https://arxiv.org/abs/2510.04033>
+- MedLog OpenAPI spec 0.0.1 (live, canonical): <https://medlogprotocol.ai/api-reference/openapi.yaml>. Checked 2026-11-15.
+- MedLog doc index for agents: <https://medlogprotocol.ai/llms.txt> (per-field pages at `/specification/<field>.md`)
+- Pilot repository: `mims-harvard/MedLog`. The spec is **not** on `main`; the live site is canonical.
+- Linux references: `man journald.conf`, `man systemd.exec` (LogExtraFields, LogRateLimit*), `man journalctl`, `man logrotate`, `man auditctl`, rsyslog documentation (omfwd, TLS).
+- The `[REC]` items, the radiology mapping (§8, §13) and the sizing example (§15) are this guidebook's own synthesis for this app, not MedLog text.

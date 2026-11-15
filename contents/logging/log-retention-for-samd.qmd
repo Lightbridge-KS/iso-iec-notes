@@ -1,0 +1,553 @@
+---
+title: "Log Retention for SaMD"
+subtitle: "Mandated floors, recommended periods and optimal windows by log category, jurisdiction and party (RAMAAI on Linux/journald)"
+---
+
+*Status date: 10 November 2026. This is a regulatory-research briefing, not legal advice. Items marked [VERIFY] could not be confirmed against a primary text during this research and should be checked by counsel.*
+
+No law in Thailand, the US or the EU sets one retention number for medical-device software logs. The hard numbers come from adjacent regimes. Based on those, RAMAAI should adopt a **tiered default of ≥90 days hot on each client (journald), 13 months searchable in the hospital's central store, and up to 24 months in cold archive for security/audit and AI-inference logs**. Any log excerpt pulled into a complaint, CAPA or vigilance file becomes a quality record, kept for **at least max(device lifetime, 2 years from release)**, and for **≥10 years after the last device is placed on the EU market** where RAMAAI sells under the MDR.
+
+## TL;DR
+
+- **Hard floors that bite today:**
+  - Thailand's Computer Crime Act s.26 sets a 90-day floor for traffic data, extendable by order to 2 years. It applies only if the holder is a "service provider", which is unclear for a hospital.
+  - ISO 13485 §4.2.5, incorporated by the US QMSR since 2 February 2026, requires records to be kept for at least the device lifetime and never less than 2 years from release.
+  - EU MDR Art. 10(8) requires technical documentation to be kept 10 years after the last device is placed on the market.
+  - The EU AI Act's 6-month log floor (Arts. 19 and 26(6)) does not yet bite. Regulation (EU) 2026/1744 (the "Digital Omnibus on AI") moved it to 2 August 2028 for MDR-embedded AI.
+- **Most security standards require logging capability but set no retention number.** This applies to IEC 62304, IEC 81001-5-1, IEC 62443-4-2, ISO/IEC 27001 A.8.15, NIST 800-53 AU-11, MDS2 and IHE ATNA. The usable numeric benchmarks are:
+  - CIS Controls v8 8.10: 90 days.
+  - PCI DSS 10.5.1: 12 months, with 3 months immediately available.
+  - OMB M-21-31: 12 months active plus 18 months cold. It was rescinded on 22 May 2026 by OMB M-26-14, which requires logs to be actively searchable for at least 6 months and retrievable for a year.
+- **"Optimal" is driven by detection latency, not law.**
+  - IBM's 2025 Cost of a Data Breach report found healthcare breaches took 279 days to identify and contain, "more than five weeks longer than the global average" of 241 days.
+  - Mandiant's M-Trends 2026 reports a 14-day global median dwell time, but 122 days for espionage and 393 days for BRICKSTORM cases. It states that with BRICKSTORM dwell times, "standard 90-day log retention leaves organizations unable to identify the initial access vector."
+  - So 90 days is a floor for the client, not a target for the fleet. For security and AI logs the right window is 13 months searchable, with an archive ceiling near 24 months. The ceiling is set by PDPA/GDPR storage limitation and by breach blast radius.
+
+---
+
+## 1. Executive summary: the retention matrix on one page
+
+```
+                 FLOOR (max of legal minimums,           CEILING (PDPA s.37 / GDPR 5(1)(e),
+                 investigation latency, dwell time)      cost, breach blast radius)
+                        |                                        |
+  0d ----- 90d -------- 6mo -------- 13mo ------------- 24mo ----+------ device lifetime / 10y
+           |            |            |                  |               |
+     client journald  EU AI Act   hospital central   cold archive     QMS evidence
+     hot tier (CCA    Art.26(6)   SIEM searchable    (CCA 2y order    (ISO 13485 / MDR
+     s.26, CIS 8.10)  (from 2028) (PCI-style 12m+)   max; IBM 279d)   Art.10(8); AI Act Art.18)
+```
+
+| # | Log category | Who holds it | Mandated floor (strongest applicable) | Recommended benchmark | Ceiling driver | **Proposed optimal** |
+|---|---|---|---|---|---|---|
+| 1 | Diagnostic / operational (debug, errors, perf) | Hospital (client journald, central store) | None specific. CCA s.26 90 days only if the logs are "traffic data" and the hospital is a "service provider" | CIS 8.10: 90 days | Storage cost; PDPA/GDPR if personal data leaks in | **Client 90 days hot (≥90d guaranteed by sizing); central 13 months; then delete** |
+| 2 | Security / audit (logins, config, network, who-did-what) | Hospital (journald → SIEM); manufacturer only for its own cloud/update services | TH: CCA 90 days (if a service provider; up to 2 years by order). US: HIPAA requires audit *controls* (no number); 6-year rule for "documentation" contested. EU: AI Act 6 months (from 2 Aug 2028) for AI-system logs | PCI DSS 12 months (3 hot); OMB M-21-31 12+18 months (rescinded) | GDPR/PDPA minimisation; blast radius | **Client 90 days; central 13 months searchable; cold archive to 24 months; legal hold overrides** |
+| 3 | AI inference & performance (input/output metadata, model version, confidence, overrides) | Hospital (deployer) holds raw logs; manufacturer (provider) receives pseudonymised/aggregated PMS data | EU: AI Act Art. 26(6) deployer ≥6 months and Art. 19 provider ≥6 months for logs under its control (both from 2 Aug 2028). TH/US: none numeric | FDA AI lifecycle draft (Jan 2025) expects real-world performance monitoring; no number | GDPR/PDPA (inputs are health data) | **Hospital raw: 13 months. Manufacturer aggregated PMS data: QMS-record rule (row 4)** |
+| 4 | QMS evidence (log excerpts in complaint/CAPA/vigilance files) | Manufacturer (RAMAAI QMS) | ISO 13485 §4.2.5 / QMSR: ≥ device lifetime, ≥2 years from release. 21 CFR 803.18: MDR event files 2 years from event or expected life, whichever greater. EU MDR Art. 10(8): 10 years after last device placed on market. AI Act Art. 18: 10 years | n/a (floors are the guidance) | Personal data inside excerpts → pseudonymise | **Retain until the later of (a) release + L + 2 years and (b) 10 years after the last unit/version is placed on the EU market** |
+| 5 | Logs containing personal data (HN, names, DICOM Study/Series UIDs, accession numbers) | Both (hospital = controller; RAMAAI = processor or separate controller for its PMS data) | No floor of its own; inherits the floor of its category | Design-out PII; pseudonymise at source | **PDPA s.37(3) / GDPR Art. 5(1)(e): shortest necessary** | **Treat any leak as an incident: redact/purge within 30 days unless the data is under legal hold or is QMS evidence (then pseudonymise)** |
+
+*L = expected device lifetime as defined by RAMAAI (currently undefined; see §9).*
+
+---
+
+## 2. Log taxonomy and who holds each log
+
+```
+           RAMAAI (manufacturer / AI "provider")                     HOSPITAL (HDO / AI "deployer" / PDPA-GDPR controller)
+  +-----------------------------------------------+        +-------------------------------------------------------------+
+  | Complaint files, CAPA, vigilance (Cat 4)      |        | Client PC: systemd-journald (Cat 1,2,3, maybe 5)            |
+  | PMS / AI performance data (Cat 3, aggregated) | <----- |   -> forward (journal-upload / rsyslog / Loki agent)        |
+  | Vulnerability investigation material (Cat 4)  |  DPA,  | Central syslog / SIEM / log lake (Cat 1,2,3)                |
+  | Labeling: IFU, MDS2 AUDT, security manual     |  pseud-| PACS/RIS/EMR audit trails (ATNA ARR) (Cat 2,5)              |
+  |  -> SPECIFIES retention to the hospital       |  onym- | Legal holds, incident evidence                              |
+  +-----------------------------------------------+  ised  +-------------------------------------------------------------+
+                                                   excerpts
+              Data-transfer boundary: PDPA s.28-29 / GDPR Ch. V cross-border; Art. 28 GDPR / PDPA s.40 processor terms
+```
+
+**Who holds what:**
+
+- **Cat 1, diagnostic/operational.** These are generated on the hospital's machines and stay in the hospital's custody. RAMAAI sees them only when the hospital exports an excerpt for a support ticket or complaint.
+- **Cat 2, security/audit.** These are the hospital's evidence: its own access-control, HIPAA audit-control and NCSA duties. RAMAAI's duty is to make the device capable of producing them and to tell the hospital how to keep them.
+- **Cat 3, AI inference/performance.** The AI Act splits this category explicitly: each party keeps the logs "to the extent such logs are under their control."
+  - For an on-premises client, the raw logs sit with the deployer (the hospital).
+  - RAMAAI's Art. 19 duty attaches only to what it actually receives, e.g. telemetry or pseudonymised PMS feeds.
+- **Cat 4, QMS evidence.** Once an excerpt enters a complaint record, CAPA or vigilance file, it is a controlled quality record in RAMAAI's ISO 13485 QMS, and its clock is the QMS clock, not the log clock.
+- **Cat 5, personal data.** This is a property that can attach to any category, not a separate stream. It does not create a floor; it imposes the ceiling.
+
+---
+
+## 3. Mandatory requirements
+
+### 3.1 Thailand
+
+**Medical Device Act B.E. 2551 (amended B.E. 2562) and Thai FDA**
+
+- **No log-retention rule.** No Thai FDA instrument found sets a retention period for device software logs.
+- **SaMD/AI guidance.** The Thai FDA's SaMD/AI guideline (draft circulated 2023–2024; registration guidance released 2024) covers four areas: secure design, security documentation to users, risk management, and incident detection/response.\[1\] None of these sets a log period.
+- **Record-keeping by licensees.** The duty to keep records rests on licensees. The current instrument is the MOPH Notification on records and reports for the manufacture, import and sale of medical devices (published 30 January 2026, effective 1 March 2026), which replaces the 2012/2021 rules.
+  - It requires records to be kept "at least five years from the date of manufacture, importation, or sale" (as reported by Asia Actual, 25 March 2026). A separate Thai FDA complaint-record notice requires complaint records to be kept "not less than 5 years".
+- **Adverse-event reporting** (MOPH Notification on medical device malfunctions, adverse events and field safety reports, 22 October 2020, AMDD Annex 5-aligned):
+  - Serious public-health threat: immediately and no later than 48 hours.\[2\]\[3\]
+  - Death or serious injury: 10 days.\[2\]\[3\]
+  - Events whose recurrence could cause death or serious injury: 30 days.\[2\]\[3\]
+  - Follow-up report: 30 days after the initial report.\[4\]\[5\]
+- **CSDT dossier.** It should therefore document logging capability and labeling. Thai FDA cybersecurity content is guidance, not a separately mandated deliverable.\[6\]
+
+**PDPA B.E. 2562**
+
+- **Ceiling, not floor:**
+  - The controller must erase or anonymise data when the retention period expires or the data is no longer necessary (s.37(3)).
+  - The record of processing activities must state the retention period (s.39).
+  - Processors act only on documented instructions (s.40).
+  - Cross-border transfer requires an adequate destination or appropriate safeguards (ss.28–29).
+- **PDPC AI guidance and the 2026 draft PDPA amendment.** Not verified in this research. [VERIFY]
+
+**Computer Crime Act B.E. 2550 (No. 2, B.E. 2560), s.26, and the MDES Notification B.E. 2564**
+
+- **The rule.** Section 26: a service provider "must retain computer traffic data for not less than ninety days from the date the data enters the computer system". An official may order retention "beyond ninety days but not exceeding two years" case by case. Penalty: fine up to THB 500,000.\[7\]\[8\]
+- **The 2021 notification.** The MDES Notification on criteria for retention of computer traffic data by service providers B.E. 2564:
+  - Royal Gazette Vol. 138, Special Part 188 Ng, 13 August 2021; in force the next day.\[9\]
+  - It repealed the 2007 ICT notification.\[10\]
+  - Clause 4 defines a service provider as (1) one who provides *others* with internet access or other computer-mediated communication, in its own name or for others, and (2) one who stores computer data for others.\[10\]
+  - Clause 5(1) lists the retention-obligated categories as providers *"to the general public"*: telecom/broadcast carriers, access service providers, host service providers, internet cafés, and online application stores/AI applications enabling communication.\[10\]
+- **Is a hospital a "service provider"? Uncertain.**
+  - Against: the "general public" qualifier in clause 5(1) suggests purely internal staff networks fall outside the listed duty.
+  - For: patient/guest Wi-Fi, hosted portals, or a broad reading of clause 4 ("others") could bring a hospital in.
+  - The 2007 annex explicitly covered organisations giving staff access; whether the 2021 annex keeps that was not confirmed.
+- **Is RAMAAI a "service provider"? Not plausible.** An on-premises client vendor does not provide communication to the public. It could become one if it hosts a cloud service for hospitals (clause 4(2), "stores data for others").
+- **Practice.** Thai organisations widely treat 90 days as the default.\[11\]\[12\]\[13\]
+- **Recommendation.** Design for 90 days on the hospital side regardless. It is cheap, and it meets most of the other floors.
+
+**Cybersecurity Act B.E. 2562 and NCSA instruments**
+
+- **Healthcare is a CII sector.** Public health is a CII sector under s.49(7).\[14\]
+- **The binding code of practice has no number.** The Cybersecurity Regulating Committee Notification on the Code of Practice and Standard Framework for state agencies and CII, B.E. 2564:
+  - Royal Gazette Vol. 138, Special Part 208 Ng, 6 September 2021; in force one year later.\[15\]
+  - Clause 22.1.3 requires keeping "logs of all access and all attempts to access critical services" and reviewing them regularly.\[15\]
+  - **It sets no retention period.**
+- **Where "90 days" comes from.** The "CII must keep logs 90 days" claim found in vendor material appears to derive from the CCA, or from agencies' own codes of practice (e.g. one ministry office code specifies 90 days for incident-related logs). It does not come from a national NCSA rule.\[12\]\[16\]
+- **Not checked.** The NCSC Minimum Standard for Data/Information Systems B.E. 2566 (in force 18 January 2024) was not reviewed and may contain a logging control.\[17\] [VERIFY]
+- **CII operational duties** (CRC notification of 22 February 2024, effective 20 June 2024): report incidents to the NCSA and regulator within 24 hours, and cooperate in evidence collection.\[18\] These imply that logs must exist long enough to be preserved.
+- **Updated CII criteria.** An NCSC notification on CII criteria and regulator assignment, B.E. 2568 (published 16 September 2025, effective ~17 September 2025), lists public-health activities including medical services, medical-device production and health data systems.\[19\]
+- **Is Ramathibodi designated CII? Not confirmed.**
+  - An MOPH presentation of March 2025 reports a direction to designate state agencies holding personal data of ≥100,000 people, including all MOPH hospitals, as CII "in future".\[20\]
+  - Ramathibodi sits under Mahidol University / the higher-education ministry, not MOPH.
+  - Designations are not generally published. [VERIFY with NCSA / the hospital CISO]
+- **Other NCSA standards.** The NCSA Website Security Standard (effective 16 September 2026) and the Cloud Cybersecurity Standard bind CII and state agencies. They refer back to "log management per the Computer Crime Act".\[19\]\[21\]\[22\]
+
+**Medical records / HA**
+
+- No specific audit-trail retention period was verified for Thai hospital accreditation or MOPH medical-record rules. [VERIFY]
+
+### 3.2 United States
+
+**QMSR (21 CFR Part 820, effective 2 February 2026)**
+
+- **Retention period.** ISO 13485:2016 is incorporated by reference, so §4.2.5 governs: retain records "for at least the lifetime of the medical device as defined by the organization... but not less than two years from the medical device release."\[23\]\[24\]\[25\]
+  - The old §820.180(b) wording ("design and expected life of the device, but in no case less than 2 years from the date of release") was repealed with Subpart M.\[25\]\[26\]\[27\]
+  - The substance is unchanged.
+- **Complaint records.** §820.35(a) adds FDA-specific content for complaint records: review, evaluation and investigation, device name, date received, UDI/UPC, and nature and details.\[28\] Log excerpts supporting an investigation belong in this record.
+
+**Part 803 (MDR reporting)**
+
+- **Deadlines:** 30 calendar days for deaths, serious injuries and reportable malfunctions; 5 work days where remedial action is needed to prevent an unreasonable risk of substantial harm, or where FDA requests it.
+- **Retention:** §803.18 requires MDR event files to be kept 2 years from the date of the event, or for a period equal to the expected life of the device, whichever is greater.
+
+**Part 806 (corrections and removals)**
+
+- §806.20 requires records of unreported corrections/removals to be kept for 2 years beyond the expected life of the device. [VERIFY exact wording]
+
+**FD&C Act §524B and the premarket cybersecurity guidance**
+
+- **Statute.** Section 524B (in force 29 March 2023) applies to "cyber devices".\[29\] RAMAAI, as networked software, should assume it is one.
+- **Guidance versions.** "Cybersecurity in Medical Devices: Quality Management System Considerations and Content of Premarket Submissions" was re-issued as a final guidance on 3 February 2026, aligning with the QMSR and superseding the 27 June 2025 version.\[30\]\[31\]\[32\]
+  - Some FDA listings still show the June 2025 date; confirm the current version on fda.gov.\[33\]
+- **What it says about logging.** "Event detection and logging are critical capabilities that should be present in a device and the larger system in which it operates."\[34\]
+- **What it recommends for labeling.** Information enabling users to operate the device securely.
+- **No retention period.**
+
+**HIPAA Security Rule** (applies only if a US hospital is a covered entity and RAMAAI handles ePHI as a business associate)
+
+- **Audit controls.** §164.312(b) requires mechanisms that "record and examine activity", with no period.
+- **The 6-year question.** §164.316(b)(2)(i) requires *documentation* (policies, procedures and required actions/assessments) to be kept 6 years from creation or last effective date.
+  - Whether raw audit logs are "documentation" is **contested**. The prevailing conservative practice keeps audit-log *review records* and incident evidence 6 years, not every raw event.
+- **The 2025 NPRM is not final.** The HIPAA Security Rule NPRM (90 FR 898, 6 January 2025) is **not final** as of October–November 2026. The Unified Agenda moved final action to **July 2027**, and the current rule remains enforced.\[35\]\[36\]\[37\]\[38\]
+
+**21 CFR Part 11**
+
+- §11.10(e) audit trails must be retained "at least as long as that required for the subject electronic records."
+- This applies to RAMAAI's eQMS records, i.e. Cat 4. It does not apply to operational journald logs, which are not predicate-rule records.
+
+**AI-specific guidance**
+
+- **Lifecycle guidance still draft.** "AI-Enabled Device Software Functions: Lifecycle Management and Marketing Submission Recommendations" (draft, 7 January 2025, 90 FR 1154) **remains draft** as of September–October 2026. It is on CDRH's FY2027 A-list.\[39\]\[40\]
+  - It recommends postmarket performance monitoring.\[41\]
+  - It sets no log retention number.
+- **PCCP guidance final.** The PCCP guidance is final; the current version is dated 18 August 2025 (first final December 2024).\[40\]
+
+### 3.3 European Union
+
+**MDR 2017/745**
+
+- **Retention.** Art. 10(8): keep the technical documentation, EU declaration of conformity and certificates available "for a period of at least 10 years after the last device covered by the EU declaration of conformity has been placed on the market" (15 years for implantables).
+  - PMS documentation (Annex III), and therefore the complaint/trend evidence feeding it, sits inside the technical documentation.
+- **PMS.** Arts. 83–86 require a PMS system, a PMS plan and a PSUR for Class IIa and above.
+- **Vigilance.** Art. 87 reporting deadlines:
+  - Serious incident: immediately, no later than 15 days after awareness.
+  - Serious public-health threat: 2 days.
+  - Death or unanticipated serious deterioration: 10 days.
+
+**MDCG 2019-16 rev.1 (July 2020, Guidance on cybersecurity)**
+
+- Lists "Audit Controls" among the information to supply to operators.
+- Names "implementation of the logging function, particularly the medical device's log storage capacity" as information for healthcare providers.\[42\]
+- Lists "logging parameters" among the secure-configuration items.\[43\]
+- **No retention number.**
+
+**GDPR**
+
+- **Ceiling for Cat 5.** Art. 5(1)(e) (storage limitation): no longer than necessary.
+- **Roles and transfers.** Art. 28 governs processors, and Chapter V governs transfers to Thailand. No EU adequacy decision for Thailand was identified [VERIFY], so SCCs would be needed if RAMAAI receives personal data.
+
+**AI Act (Regulation (EU) 2024/1689, as amended by Regulation (EU) 2026/1744)**
+
+- **Application date.**
+  - The Digital Omnibus on AI was proposed 19 November 2025, provisionally agreed 6–7 May 2026, approved by Parliament 16 June 2026 and by the Council 29 June 2026, published in the OJ 24 July 2026, and in force 27 July 2026.\[44\]\[45\]\[46\]
+  - Annex III high-risk obligations now apply from 2 December 2027.\[46\]
+  - **Annex I (product-embedded, including MDR devices) high-risk obligations apply from 2 August 2028** (previously 2 August 2027).\[47\]\[48\]
+  - Reported mechanism: where sectoral law provides equivalent protection, the Commission may limit some AI Act obligations.\[49\]\[50\] [VERIFY the final Art. 6/Annex I text]
+- **Is RAMAAI high-risk? Assumption confirmed in principle.** MDCG 2025-6 / AIB 2025-1 (June 2025) says a device AI system is high-risk under Art. 6(1) where it is a safety component or is itself a device *and* requires notified-body conformity assessment.\[51\]\[52\] MDR Rule 11 Class IIa+ qualifies.
+  - The FAQ predates the Omnibus and still cites the 2027 date.\[51\]
+  - It asks that AI Act record-keeping and logging be integrated into the MDR QMS and technical documentation.\[52\]\[53\]
+- **Logging duties:**
+  - Art. 12: the system must technically allow automatic recording of events over its lifetime, for risk identification, post-market monitoring (Art. 72) and deployer monitoring (Art. 26(5)).\[52\]\[54\]
+  - Art. 19(1): providers keep the logs under their control "for a period appropriate to the intended purpose... of at least six months, unless provided otherwise in applicable Union or national law, in particular... protection of personal data".\[55\]\[56\]
+  - Art. 26(6): deployers have the same duty for logs under their control.\[57\]
+  - Art. 18: provider documentation kept 10 years after the system is placed on the market.
+
+**NIS2 (Directive (EU) 2022/2555)**
+
+- **Who is in scope.**
+  - Healthcare providers are Annex I (health) entities.
+  - Manufacturers of medical devices are Annex II (manufacturing) entities, subject to size thresholds and EU establishment/representation rules.
+- **What it requires.** Art. 21 requires risk-management measures, including incident handling and logging, as implemented by each Member State. There is no EU-wide numeric retention for hospitals.
+- **Applicability to RAMAAI** as a non-EU university unit is doubtful. [VERIFY]
+
+**Cyber Resilience Act (Regulation (EU) 2024/2847)**
+
+- Art. 2(2) excludes products to which the MDR/IVDR apply, so the CRA does not apply to RAMAAI's device software.
+
+---
+
+## 4. Standards: capability requirements (mostly no numbers)
+
+| Standard | What it requires | Sets a retention number? |
+|---|---|---|
+| ISO 13485:2016 §4.2.4–4.2.5 | Document and record control; retention | **Yes:** ≥ device lifetime as defined, ≥2 years from release\[24\] |
+| IEC 62304 §6, §9 | Maintenance plan; problem-resolution records | No (records fall under the QMS rule) |
+| IEC 81001-5-1:2021 | Security lifecycle; security documentation for operators (incl. logging capabilities) | No |
+| IEC 62443-4-2 CR 2.8 / 2.9 / 2.10 / 3.9 | Auditable events; audit storage capacity; response to audit-processing failure; protection of audit information | No (capacity must be "sufficient"; alert when approaching the limit) |
+| IEC 80001-1:2021 | HDO risk management of connected systems; responsibility agreements | No |
+| ISO/IEC 27001:2022 A.8.15 / ISO 27799 | Produce, store, protect and analyse logs | No (organisation-defined) |
+| MDS2 (2019) AUDT section | Disclosure of audit-trail capability, events captured, export, retention/storage | No (manufacturer *discloses* its value) |
+| IHE ATNA | Audit Record Repository, secure transport (RFC 5424 / DICOM audit messages) | No |
+| NIST SP 800-53 Rev.5 AU-11 | "Retain audit records for [organisation-defined time period]" | No (parameterised) |
+| AAMI TIR57 / SW96 / TIR97 | Security risk management (premarket / postmarket) | No |
+
+These standards make RAMAAI responsible for **capability** (events, timestamps, integrity, capacity, failure alarms, export). They also make it responsible for **disclosure** of what the device keeps by default, but they do not set any retention period.
+
+---
+
+## 5. Benchmarks and evidence for the "optimal" window
+
+**Numeric benchmarks**
+
+- **CIS Controls v8, Safeguard 8.10:** retain audit logs for at least 90 days.
+- **PCI DSS v4.0, Req. 10.5.1:** keep audit log history at least 12 months, with at least the most recent 3 months immediately available.
+- **OMB M-21-31 (August 2021):** 12 months active plus 18 months cold for most log types; 72 hours for full packet capture.\[58\]\[59\]
+  - It was **rescinded on 22 May 2026** by **OMB M-26-14** (Russell T. Vought), which states: "Effective immediately, OMB Memorandum M-21-31 is rescinded." M-26-14 criticises M-21-31 for requiring "retention of vast quantities of logging data without clear utility" and moves to risk-based logging plans for continuous monitoring and for threat hunting/forensics.
+  - M-26-14 Appendix B: "Retained logs must be actively searchable for a minimum of 6 months after creation… retrievable for a year after creation."
+- **NIST SP 800-92 (2006, final) and SP 800-92 Rev.1 (initial public draft, 11 October 2023; still draft):** planning playbook, no fixed number.\[60\]\[61\]
+- **HHS 405(d) HICP, H-ISAC, HSCC JSP2:** endorse centralised logging; no binding numbers were verified.
+
+**Detection-latency evidence**
+
+- **Mandiant M-Trends 2026** (published 23 March 2026, covering 2025):
+  - Global median dwell time was 14 days, up from 11.\[62\]\[63\]
+  - Espionage and DPRK IT-worker cases had a median of 122 days.\[62\]
+  - The M-Trends 2026 Executive Edition states: "With cases involving BRICKSTORM (a stealthy backdoor) averaging 393 days of dwell time, standard 90-day log retention leaves organizations unable to identify the initial access vector."
+- **IBM Cost of a Data Breach 2025:**
+  - Global lifecycle (identify + contain) was 241 days.\[64\]\[65\]
+  - **Healthcare was 279 days.** In IBM's words: "Healthcare breaches took the longest to identify and contain at 279 days. That's more than five weeks longer than the global average."
+  - Healthcare average cost was USD 7.42M.\[66\]
+  - In IBM's Cost of a Data Breach 2026, the global mean time to identify and contain rose to 247 days (183 to identify + 64 to contain), the first rise in five years, and healthcare average cost fell to USD 6.64M (reported by Becker's Hospital Review and Baker Donelson). No 2026 healthcare lifecycle figure was found, so 279 days (2025) remains the latest healthcare figure.
+
+**Complaint-to-investigation latency**
+
+- Vigilance clocks run from awareness, which may be weeks or months after the event:
+  - FDA: 30 days / 5 work days.
+  - EU: 15 / 10 / 2 days.
+  - Thailand: 48 hours / 10 days / 30 days.
+- Radiology AI errors are often discovered retrospectively: at discrepancy review, peer review or a later study. A 90-day local log will frequently have rotated before a complaint arrives.
+- **Inference:** the event must be captured in a central store or in an excerpt within ≤90 days. Central retention must cover the realistic lag from event to complaint, which is plausibly 6–12 months for retrospective radiology findings.
+
+**What this means**
+
+- 90 days covers the *median* intrusion (14 days) and a fast complaint.
+- It does not cover the healthcare-average breach lifecycle (279 days), annual PMS/PSUR cycles, or the AI Act 6-month floor.
+- **13 months** covers one full annual cycle plus a month of overlap, and exceeds the 279-day lifecycle.
+- **24 months** matches the maximum a Thai official can order under CCA s.26, and catches most long-dwell cases.\[8\]
+- Beyond 24 months, the marginal forensic value falls while PDPA/GDPR risk and blast radius keep rising. That is the ceiling.
+
+---
+
+## 6. Retention matrix: category × jurisdiction × party
+
+Legend: **M** = mandated floor; **R** = recommended/benchmark; **C** = ceiling; **O** = proposed optimal.
+
+| Category | Party | Thailand | US | EU | **O (all markets)** |
+|---|---|---|---|---|---|
+| 1 Diagnostic | Hospital | M: CCA 90d only if traffic data + service provider [uncertain]. C: PDPA s.37 | M: none. R: CIS 90d | M: none (AI Act 6m only for Art. 12 AI logs, from 2028). C: GDPR 5(1)(e) | Client ≥90d; central 13m; delete |
+| 1 Diagnostic | RAMAAI | M: none (unless excerpt → Cat 4) | same | same | Support-ticket copies ≤13m unless → Cat 4 |
+| 2 Security/audit | Hospital | M: CCA 90d (+ up to 2y on order); CII code: keep and review, no number | M: §164.312(b) capability; 6y for documentation (contested for raw logs). R: PCI 12m | M: AI Act 26(6) ≥6m for AI-system logs (from 2 Aug 2028); NIS2 national rules. C: GDPR | Client 90d; central 13m hot; archive to 24m; 6y for US HIPAA audit-review records |
+| 2 Security/audit | RAMAAI (own cloud/update/remote-support services) | M: CCA 90d if it hosts data for others | R: 524B / FDA guidance capability | M: AI Act Art. 19 ≥6m if under its control | 13m hot + 24m archive |
+| 3 AI inference | Hospital (deployer) | M: none numeric. C: PDPA | M: none numeric | **M: ≥6 months (Art. 26(6)), from 2 Aug 2028.** C: GDPR | 13 months raw, pseudonymised at source |
+| 3 AI inference | RAMAAI (provider) | M: PMS duty via MD Act/CSDT (no number) | R: FDA AI lifecycle draft monitoring | M: Art. 19 ≥6m for logs under its control; Art. 72 PMM; MDR Arts. 83–86 | Raw feed ≤13m; derived PMS datasets/analyses = Cat 4 |
+| 4 QMS evidence | RAMAAI | M: licensee records ≥5 years from manufacture/import/sale (MOPH Notification, eff. 1 Mar 2026); complaint records ≥5 years | M: ≥ lifetime, ≥2y from release (QMSR/ISO 13485); 803.18; 806.20; Part 11 audit trail | M: ≥10y after last device placed on market (MDR 10(8)); AI Act Art. 18 10y | **max(release + L + 2y, last EU placing + 10y)** |
+| 5 Personal data | Both | C: PDPA s.37(3); ROPA s.39 | C: HIPAA minimum necessary (use/disclosure) | C: GDPR 5(1)(e), 5(1)(c) | Do not log; if leaked: purge/redact ≤30d; pseudonymise in Cat 4 |
+
+---
+
+## 7. Implementation (journald and beyond)
+
+**Key fact: journald has no "minimum retention" setting.**
+
+- **The settings are all caps or thresholds:**
+  - `SystemMaxUse=` defaults to 10% of the filesystem, capped at 4 GB.
+  - `SystemKeepFree=` defaults to 15%, capped at 4 GB.
+  - `MaxRetentionSec=` defaults to 0 (no time limit).
+  - `MaxFileSec=` defaults to 1 month and only controls rotation.
+- **Consequence:** journald deletes old entries whenever a size limit is hit. The 90-day floor must therefore be *engineered*, by sizing the disk budget, and then *verified*.
+- **Storage:** `Storage=auto` (the default) persists only if `/var/log/journal` exists, so set `Storage=persistent`.
+- **Sealing:** `Seal=yes` (Forward Secure Sealing) only works after `journalctl --setup-keys`. The verification key must be stored off-host. FSS detects tampering; it does not prevent deletion.
+- [VERIFY defaults against the systemd version shipped on target distributions]
+
+**Tiered architecture**
+
+```
+ [Client journald]  --(systemd-journal-upload over TLS / rsyslog imjournal / Loki-Promtail-Alloy)-->  [Hospital central store/SIEM]  --> [Cold archive, WORM/object-lock]
+   hot: >=90d                                                                                         searchable: 13 months           to 24 months, then delete
+   Seal=yes, persistent                                                                               ATNA ARR for audit events        legal hold overrides deletion
+   structured fields: RAMAAI_CATEGORY=diag|audit|ai|...                                               role-based access, MFA           hash-chained manifests
+```
+
+**Reference `journald.conf.d/ramaai.conf` (client)**
+
+```
+[Journal]
+Storage=persistent
+Compress=yes
+Seal=yes
+SystemMaxUse=8G          # size for >=90 days at measured volume x 1.5 headroom
+SystemKeepFree=2G
+MaxRetentionSec=120day   # local ceiling: 90-day floor + 30-day buffer
+MaxFileSec=1week
+ForwardToSyslog=no       # use journal-upload or an agent instead
+RateLimitIntervalSec=30s
+RateLimitBurst=10000
+```
+
+**Design rules for the software**
+
+1. **Tag every entry with a structured category** (`RAMAAI_CATEGORY=`), plus `MODEL_VERSION=`, `SW_VERSION=` and `UDI_DI=`. The central tier can then apply different retention to each category.
+2. **AI-inference events (Cat 3) must not rely on journald alone.** If the hospital has no central store, local journald may not hold 6 months (AI Act) or 13 months (optimal).
+   - Either emit them to a dedicated, size-budgeted local store with its own retention, or make forwarding a documented installation requirement.
+3. **Never log HN, names, accession numbers or Study/Series/SOP Instance UIDs in clear text.** Use a salted keyed hash (HMAC with a hospital-held key) so that the hospital can re-identify but RAMAAI cannot.
+4. **Audit-processing failure (IEC 62443 CR 2.10):** raise an alarm when the journal is >80% of `SystemMaxUse`, or when forwarding lags >24 hours.
+5. **Floor monitor:** a daily systemd timer reads the oldest entry (`journalctl --header` head timestamp, or `journalctl -o short-iso | head -1`). It raises a `RAMAAI_CATEGORY=audit` warning if the oldest entry is <90 days old while the host has been in service >90 days.
+   - Run the same check on the central store against 13 months.
+6. **Volume estimate (illustrative, not measured):**
+   - Assumption: 100 clients × 100 MB/day raw ≈ 3.65 TB/year raw. journald/agent compression typically reduces that several-fold.
+   - Measure with `journalctl --disk-usage` during pilot and size from the 95th-percentile day.
+
+---
+
+## 8. Manufacturer obligations: labeling, MDS2, hospital agreements
+
+**IFU / security manual wording**
+
+> *"RAMAAI records operational, security-audit and AI-inference events to the Linux systemd journal. The default configuration retains at least 90 days of events locally, subject to available disk space (configured limit: [X] GB). RAMAAI does not by itself guarantee long-term retention. The operator is responsible for forwarding logs to a central log store and for retaining them in accordance with applicable law and the operator's policies. RAMAAI recommends at least 13 months of searchable retention for audit and AI-inference events. Where the EU AI Act applies, deployers must retain automatically generated logs under their control for at least six months (from 2 August 2028). Logs are designed not to contain direct patient identifiers. If personal data is found in logs, report it to RAMAAI as a security incident. Forward Secure Sealing is enabled; keep the verification key off the device."*
+
+**MDS2 (2019) AUDT section**
+
+- Answer the capability questions: events logged, timestamps and time sync, export format, integrity protection, local storage capacity in days at typical load, and forwarding protocols.
+- State the default local retention and the recommended central retention.
+
+**Hospital agreements**
+
+- **Data processing / data sharing agreement**, covering:
+  - Roles. For PMS telemetry RAMAAI is likely a separate controller for pseudonymised data, or a processor for support access; decide per flow.
+  - Categories of data and the pseudonymisation method.
+  - Retention per category, matching §6.
+  - Cross-border transfer basis: PDPA ss.28–29, plus SCCs for EU-origin data.
+  - Breach notification: PDPA 72 hours, GDPR 72 hours.
+- **Log-access clause for PMS and vigilance.** The hospital agrees to preserve and export relevant log ranges within [5] working days of a RAMAAI request tied to a complaint or incident, and to place a legal hold on them.
+- **IEC 80001-1 responsibility agreement**, covering who forwards, who stores and who monitors the floor.
+
+---
+
+## 9. Draft QMS text (paste into the SDP and the Security Plan)
+
+**SDP §X — Logging and Log Retention Requirements**
+
+> **X.1 Scope.** This section applies to all RAMAAI software items that emit events to systemd-journald or other log sinks.
+>
+> **X.2 Categories.** Every log entry shall carry the structured field `RAMAAI_CATEGORY` with one of: `diag` (diagnostic/operational), `audit` (security/audit), `ai` (AI inference/performance). QMS evidence (`qms`) is not emitted by the device. It is created when a log excerpt is attached to a complaint, CAPA, nonconformity or vigilance record, and is thereafter controlled under SOP-Control-of-Records.
+>
+> **X.3 Content restrictions.** Log entries shall not contain direct patient identifiers (HN, name, national ID, accession number) or DICOM Study/Series/SOP Instance UIDs in clear text. Where linkage is required, a keyed hash with a hospital-held key shall be used. Unit tests shall include a PII-pattern scan of log output.
+>
+> **X.4 Default local retention.** The installer shall configure persistent journald storage sized to retain ≥90 days of events at the 95th-percentile measured volume, with `MaxRetentionSec=120day`, `Seal=yes`, and capacity and forwarding-lag alarms (IEC 62443-4-2 CR 2.9/2.10).
+>
+> **X.5 Forwarding.** The software shall support forwarding via systemd-journal-upload (TLS) and syslog (RFC 5424 over TLS). Audit events shall be mappable to IHE ATNA.
+>
+> **X.6 Verification.** A daily self-check shall record the timestamp of the oldest local entry. It shall raise an `audit` warning if the 90-day floor is not met after 90 days in service.
+>
+> **X.7 Device lifetime and record retention.** The expected lifetime *L* of each released major version is defined in the Device Master File as [N] years from release of that version. Quality records, including log excerpts in complaint, CAPA and vigilance files, shall be retained until the later of (a) release date + *L* + 2 years and (b) 10 years after the last unit of the version was placed on the EU market (MDR Art. 10(8)). Records subject to a legal hold shall not be disposed of.
+
+**Security Plan §Y — Log Management (IEC 81001-5-1 / MDCG 2019-16)**
+
+> **Y.1** RAMAAI shall disclose logging capability, default retention and recommended retention in the IFU security section and in MDS2 (AUDT).
+>
+> **Y.2** Recommended operator retention: `audit` and `ai`: ≥13 months searchable, archive ≤24 months; `diag`: ≥90 days locally, ≤13 months centrally.
+>
+> **Y.3** Logs received by RAMAAI (support excerpts, telemetry, PMS feeds) shall be retained ≤13 months unless incorporated into a quality record (then per SDP X.7). They shall be stored in [region], access-controlled, and listed in the PDPA/GDPR record of processing.
+>
+> **Y.4** Discovery of personal data in any log is a security incident under SOP-Incident. It requires redaction or purge within 30 days, a root-cause CAPA, and an assessment of PDPA/GDPR breach notification.
+>
+> **Y.5** Vulnerability-investigation material (exploit analyses, forensic log sets) is a quality record under SDP X.7.
+>
+> **Y.6** Annual review: re-check this retention schedule against M-Trends/IBM latency data and regulatory changes (AI Act Annex I date of 2 August 2028; HIPAA Security Rule final rule; Thai PDPA amendments).
+
+---
+
+## 10. Open questions for legal/regulatory counsel
+
+1. **Hospital as a CCA service provider.** Is a Thai hospital, including its patient/guest Wi-Fi, a "service provider" under clause 5 of the MDES Notification B.E. 2564? Is RAMAAI one if it hosts any cloud component?
+2. **Ramathibodi's CII status.** Is Ramathibodi (and each recipient hospital) a designated CII under the B.E. 2568 criteria? Does the NCSC Minimum Standard B.E. 2566 contain a numeric log period?
+3. **Thai FDA records.** Thai FDA licensee record retention is 5 years from manufacture, import or sale under the MOPH Notification effective 1 March 2026: confirm how this applies to software releases and whether any SaMD-specific notification adds to it.
+4. **Roles under PDPA/GDPR.** For each data flow (support excerpts, telemetry, PMS datasets), is RAMAAI a processor or an independent controller? What is the transfer mechanism for EU data to Thailand?
+5. **HIPAA.** Does the 6-year rule cover raw audit logs? Will RAMAAI be a business associate of US customers?
+6. **AI Act.** Confirm the final Omnibus text for Annex I systems: the date, and whether any Art. 12/19/26 obligations are limited for MDR devices.
+7. **NIS2.** Does NIS2 apply to RAMAAI as a non-EU manufacturer? What do the national laws require of EU hospital customers?
+8. **Device lifetime.** Fix *L*, and decide whether lifetime runs per major version or per product family.
+9. **PDPA developments.** Status of PDPC AI guidance and the 2026 draft PDPA amendment.
+
+---
+
+## Appendix: Source register (publication / effective dates)
+
+| Source | Type | Date | Status |
+|---|---|---|---|
+| Computer Crime Act B.E. 2550 (am. No. 2 B.E. 2560) s.26 | TH statute | 2007 / 2017 | In force |
+| MDES Notification on traffic-data retention B.E. 2564 (RG Vol.138 Sp.188 Ng) | TH notification | 13 Aug 2021 (eff. 14 Aug 2021) | In force |
+| Cybersecurity Act B.E. 2562, s.49 | TH statute | 2019 | In force |
+| CRC Notification, Code of Practice & Standard Framework B.E. 2564 (RG Vol.138 Sp.208 Ng), cl. 22.1.3 | TH notification | 6 Sep 2021 (eff. ~6 Sep 2022) | In force |
+| CRC Notification on CII duties | TH notification | 22 Feb 2024 (eff. 20 Jun 2024) | In force |
+| NCSC Notification, CII criteria & regulators B.E. 2568 | TH notification | 16 Sep 2025 (eff. ~17 Sep 2025) | In force; text not reviewed |
+| NCSC Minimum Standard for Data/Info Systems B.E. 2566 | TH notification | eff. 18 Jan 2024 | Not reviewed |
+| MOPH Notification, malfunctions/AE/FSCA reporting | TH notification | 22 Oct 2020 | In force |
+| MOPH Notification, records and reports for manufacture/import/sale of medical devices | TH notification | Published 30 Jan 2026 (eff. 1 Mar 2026); replaces 2012/2021 rules | In force (≥5-year record retention) |
+| Thai FDA SaMD/AI guideline | TH guidance | 2023–2024 | Guidance |
+| PDPA B.E. 2562 | TH statute | fully eff. 1 Jun 2022 | In force |
+| 21 CFR 820 (QMSR) incl. §820.35 | US regulation | Final 2 Feb 2024; eff. 2 Feb 2026 | In force |
+| 21 CFR 803 (incl. 803.18), 806 | US regulation | — | In force |
+| FDA Cybersecurity in Medical Devices (QMS considerations) | US guidance | 27 Jun 2025; re-issued 3 Feb 2026 | Final |
+| FDA AI-Enabled DSF Lifecycle (90 FR 1154) | US guidance | 7 Jan 2025 | **Draft** |
+| FDA PCCP for AI-enabled DSF | US guidance | Dec 2024; current 18 Aug 2025 | Final |
+| HIPAA 45 CFR 164.312(b), 164.316(b)(2) | US regulation | 2003/2013 | In force |
+| HIPAA Security Rule NPRM (90 FR 898) | US proposed rule | 6 Jan 2025 | **Proposed; final targeted Jul 2027** |
+| OMB M-21-31 / M-26-14 | US federal policy | Aug 2021 / 22 May 2026 | M-21-31 rescinded by M-26-14 (6 months searchable, 1 year retrievable) |
+| NIST SP 800-92 / 800-92 Rev.1 ipd | US guidance | 13 Sep 2006 / 11 Oct 2023 | Final / **Draft** |
+| MDR 2017/745 Arts. 10(8), 83–87 | EU regulation | applies 26 May 2021 | In force |
+| MDCG 2019-16 rev.1 | EU guidance | Jul 2020 | Guidance |
+| MDCG 2025-6 / AIB 2025-1 | EU guidance | Jun 2025 | Guidance (pre-Omnibus dates) |
+| AI Act 2024/1689 Arts. 12, 18, 19, 26(6), 72 | EU regulation | OJ 12 Jul 2024 | In force; high-risk Annex I applies 2 Aug 2028 |
+| Digital Omnibus on AI, Reg. (EU) 2026/1744 | EU regulation | OJ 24 Jul 2026; in force 27 Jul 2026 | In force |
+| GDPR Art. 5(1)(e), 28, Ch. V | EU regulation | 25 May 2018 | In force |
+| NIS2 Directive 2022/2555 | EU directive | transposition 17 Oct 2024 | In force (national) |
+| Cyber Resilience Act 2024/2847, Art. 2(2) | EU regulation | 2024 | MDR devices excluded |
+| ISO 13485:2016 §4.2.5 | Standard | 2016 | Current |
+| IEC 62443-4-2, IEC 81001-5-1, IEC 62304, IEC 80001-1:2021, ISO/IEC 27001:2022 | Standards | various | Current |
+| CIS Controls v8 (8.10); PCI DSS v4.0 (10.5.1) | Benchmarks | 2021 / 2022 | Current |
+| Mandiant M-Trends 2026 | Industry report | 23 Mar 2026 | — |
+| IBM Cost of a Data Breach 2025 | Industry report | Jul 2025 | — |
+
+## Sources
+
+1. [Cybersecurity Regulations for Medical Devices in Asia](https://asiaactual.com/blog/cybersecurity-regulations-for-medical-devices-in-asia/)
+2. [Thailand Medical Device Post-Market Surveillance (PMS) and Adverse Event Reporting](https://elendilabs.com/en/articles/tha-md-post-market-surveillance)
+3. [Thailand Post Market Surveillance for Medical Devices](https://asiaactual.com/thailand-3/post-market-surveillance/)
+4. [PMS Requirements for Medical Devices in Thailand](https://www.freyrsolutions.com/blog/pms-requirements-for-medical-devices-in-thailand)
+5. [Medical Device Post Market Surveillance (PMS) in Thailand](https://andamanmed.com/regulatory-services/post-market-surveillance-medical-devices/thailand/)
+6. [Thailand Thai FDA - Cybersecurity Submission Playbook](https://mdccrosswalk.com/standards/th)
+7. [พระราชบัญญัติว่าด้วยการกระท าความผิดเกี่ยวกับคอมพิวเตอร์ (ฉบับที่ ๒)](https://www.dga.or.th/wp-content/uploads/2016/12/file_ce8c32197b28a5d438136a3bd8252b7c.pdf)
+8. [การเก็บ Log ตาม พรบ.ว่าด้วยการกระทำความผิดเกี่ยวกับคอมพิวเตอร์](https://sysnetcenter.com/log-collection.htm)
+9. [ประกาศกระทรวงดิจิทัลเพื่อเศรษฐกิจและสังคม เรื่อง หลักเกณฑ์การเก็บรักษาข้อมูลจราจรทางคอมพิวเตอร์ของผู้ให้บริการ พ.ศ. 2564](https://dmsic.moph.go.th/index/detail/8756)
+10. [เปิดหลักเกณฑ์ใหม่การเก็บรักษาข้อมูลจราจรทางคอมพิวเตอร์ของผู้ให้บริการ](https://www.thansettakij.com/technology/491889)
+11. [กฏระเบียบที่เกี่ยวข้อง](https://arit.pcru.ac.th/2022/view/show_blog/63)
+12. [พ.ร.บ. ไซเบอร์ 2562 คืออะไร? สิ่งที่องค์กรไทยต้องรู้](https://nt-metro-service.com/article/solution-how-to/cybersecurity-act-2562/)
+13. [การเก็บ Log File สำหรับองค์กร: ออกแบบให้ตรวจสอบได้และสอดคล้อง… — Cyber Defense](https://cyberdefense.co.th/th/blog/logfilent)
+14. [พระราชบัญญัติ การรักษาความมั่นคงปลอดภัยไซเบอร์ พ.ศ. ๒๕๖๒](https://www.ratchakitcha.soc.go.th/DATA/PDF/2562/A/069/T_0020.PDF)
+15. <https://ratchakitcha.soc.go.th/documents/17176753.pdf>
+16. [ประมวลแนวปฏิบัติและกรอบมาตรฐาน ด้านการรักษาความมั่นคงปลอดภัยไซเบอร์ ของ](https://www.opsmoac.go.th/nakhonsithammarat-dwl-files-481291791929)
+17. [แบบสำรวจระดับความพร้อมด้านความ มั่นคงปลอดภัยไซเบอร์ของหน่วยงาน](https://arit.rmutt.ac.th/download/regulations-guidelines/20260723-13.pdf)
+18. [Thailand Details CII Organizations' Cybersecurity Duties](https://www.legal500.com/intelligence/thailand/technology/thailand-details-cii-organizations'-cybersecurity-duties)
+19. [Thailand's Website Security Standard and New Criteria of ...](https://chandler.morihamada.com/sites/default/files/newsletters/newsletters/pdf/Thailand%E2%80%99s%20Website%20Security%20Standard%20and%20New%20Criteria%20of%20Critical%20Information%20Infrastructure%2018%20September%202025.pdf)
+20. <https://www.nstda.or.th/nac/2025/wp-content/uploads/2025/04/CyberNSTDA-%E0%B8%A0%E0%B8%B2%E0%B8%99%E0%B8%B8%E0%B8%9E%E0%B8%87%E0%B8%A8%E0%B9%8C.pdf>
+21. [Thailand's NCSA cloud standard: who it binds](https://aipdpa.com/en/articles/cloud-security-standard-2567)
+22. [แบบประเมิน ค1 / ค2 · Website Security Standard](https://websitesecurity.ncsa.or.th/forms.html)
+23. [21 CFR Part 820 (QMSR): What Changed and How to Comply](https://www.greenlight.guru/blog/21-cfr-part-820)
+24. [ISO 13485 - Control of Records (4.2.5) question](https://elsmar.com/elsmarqualityforum/threads/iso-13485-control-of-records-4-2-5-question.89272/)
+25. [Pre-QMSR Part 820 §820.180 → §4.2.5 — Kelsey Quality](https://kelseyqms.com/crosswalk/qmsr/req-qmsr-820-35)
+26. [CFR 2011 title21 vol8 sec820 181](https://www.govinfo.gov/content/pkg/CFR-2011-title21-vol8/pdf/CFR-2011-title21-vol8-sec820-181.pdf)
+27. [emc mdqs page 21](https://www.fda.gov/emc-mdqs-page-21)
+28. [www.law.cornell.edu](https://www.law.cornell.edu/cfr/text/21/820.35)
+29. [FDA Cybersecurity Guidance: Medical Device Reporting Rules](https://censinet.com/perspectives/fda-cybersecurity-guidance-medical-device-reporting-rules)
+30. [\[Federal Register Volume 90, Number 122 (Friday, June 27, 2025)\]](https://www.govinfo.gov/content/pkg/FR-2025-06-27/html/2025-11669.htm)
+31. [Software as a Medical Device (SaMD): FDA and EU Guide](https://www.greenlight.guru/blog/samd-software-as-a-medical-device)
+32. [The New FDA Cybersecurity Rules for Medical Devices: What Manufacturers Must Prove Before They Ship](https://www.keyfactor.com/blog/the-new-fda-cybersecurity-rules-for-medical-devices-what-manufacturers-must-prove-before-they-ship/)
+33. [Guidances with Digital Health Content](https://www.fda.gov/medical-devices/digital-health-center-excellence/guidances-digital-health-content)
+34. [FDA Premarket Cybersecurity Guidance](https://www.medcrypt.com/standards/fda-premarket-cybersecurity-guidance)
+35. [HIPAA Security Rule Update for 2026: How to Prepare](https://www.bdemerson.com/article/hipaa-security-rule-update-2026)
+36. [HIPAA Security Rule Update: What the Proposed Rule Changes and What to Do Before It Is Final](https://massivegrid.com/blog/hipaa-security-rule-update-2026-what-changes/)
+37. [HIPAA Security Rule Proposed Changes: Status and What to Do](https://www.beefedupit.com/blog/hipaa-security-rule-proposed-changes/)
+38. [New HIPAA Security Rule: 2026 Status and What Changes](https://hipaacomplianthosting.com/blog/new-hipaa-security-rule)
+39. [FDA draft guidance: Artificial Intelligence-Enabled Device Software Functions: Lifecycle Management and Marketing Submission Recommendations](https://eminencegrowthsolutions.com/tools/eminence-scan/record/fed-051/)
+40. [FDA AI Device Lifecycle Guidance and PCCPs, Explained](https://www.meilynx.com/reference/fda-ai-device-lifecycle)
+41. [FDA AI Guidance for Medical Devices: A Practical Guide - Jama Software](https://www.jamasoftware.com/blog/navigating-fda-ai-guidance-for-medical-devices-a-practical-guide/)
+42. [MDCG 2019-16 Rev.1 - Public Health](https://health.ec.europa.eu/document/download/b23b362f-8a56-434c-922a-5b3ca4d0a7a1_en)
+43. [MDCG 2019-16 rev.1: Guidance on Cybersecurity for Medical Devices](https://docs.team-ra.org/en/eu_mdr/mdcg/mdcg-2019-16)
+44. [EU AI Act Deal: Digital Omnibus Now in Force](https://usercentrics.com/knowledge-hub/eu-ai-act-high-risk-delay-article-50-transparency-consent/)
+45. [EU AI Act Omnibus Agreement — Postponed High-Risk Deadlines and Other Key Changes - Gibson Dunn](https://www.gibsondunn.com/eu-ai-act-omnibus-agreement-postponed-high-risk-deadlines-and-other-key-changes/)
+46. [Digital Omnibus Adopted: AI Act High-Risk Delayed to 2027](https://www.aiacto.eu/en/blog/digital-omnibus-ai-act-report-2027)
+47. [New Omnibus Agreement: How the EU AI Act changes](https://www.dastra.eu/en/blog/simpler-safer-stricter-where-it-counts-inside-the-eu-ai-omnibus-deal/60025)
+48. [EU AI Act Delay Is Final: High-Risk Moves to Dec 2027](https://accuroai.co/blog/eu-ai-act-delayed-december-2027-digital-omnibus)
+49. [AI Act rules on high-risk AI delayed as AI Digital Omnibus agreed - Winston Taylor](https://www.winstontaylor.com/insights/ai-act-rules-on-high-risk-ai-delayed-as-ai-digital-omnibus-agreed)
+50. [EU AI Act: High-Risk Rules Delayed To December 2027 - Softtechhub](https://softtechhub.us/2026/11/10/eu-ai-act-high-risk-delay-2027/)
+51. [MDCG 2025-6: MDR/IVDR and the AI Act interplay - FAQ, Explained - OpenRegulatory](https://openregulatory.com/mdcg/mdcg-2025-6)
+52. [MDCG published new guidance on the interplay between the MDR & IVDR and the AI Act](https://www.hlc.com/en/publications/mdcg-published-new-guidance-on-the-interplay-between-the-mdr-ivdr-and-the-ai-act)
+53. [MDCG 2025-6 in practice: adding AI Act requirements to your existing technical file](https://candelalabs.tech/blog/mdcg-2025-6-ai-act-technical-file)
+54. [AI Act: Guidelines for Medical Device Manufacturers according to MDR (2026)](https://quickbirdmedical.com/en/ai-act-medical-devices-mdr/)
+55. [EU AI Act Log Retention: The 6-Month Rule (In Practice)](https://www.legalithm.com/en/blog/eu-ai-act-log-retention-record-keeping-6-months)
+56. [AI Act Logging Rules: Articles 12, 19 and 26](https://lawgent.se/ai-act-logging-record-keeping-article-12/)
+57. [EU AI Act Article 12 Logging Requirements for AI Agents](https://kla.digital/blog/eu-ai-act-article-12-logging-requirements)
+58. [elastic.co/industries/public-sector/civilian Industry Brief:](https://www.elastic.co/pdf/elastic-industry-brief-executive-order-on-improving-the-nations-cybersecurity.pdf)
+59. [Meet EO 14028 requirements with Datadog Log Management, Workload Protection, and Cloud SIEM](https://www.datadoghq.com/blog/m2131-executive-order-public-sector-cloud-security-datadog/)
+60. [NIST SP 800-92 Log Management Guide](https://nhimg.org/nist-sp-800-92-log-management-guide)
+61. [NIST Special Publication (SP) 800-92 Rev. 1 (Draft), Cybersecurity Log Management Planning Guide](https://csrc.nist.gov/pubs/sp/800/92/r1/ipd)
+62. [M-Trends 2026 Report: Executive Edition](https://cloud.google.com/security/resources/m-trends-executive-edition)
+63. [What does dwell time prove about an incident?](https://cybersecurityincidentinstitute.com/blog/what-dwell-time-proves/)
+64. [Cost of a Data Breach 2026: IBM Benchmarks and Reduction Plan](https://deepstrike.io/blog/cost-of-a-data-breach)
+65. [Average Cost of a Data Breach \[2026\]: Latest Statistics](https://app.stationx.net/articles/cost-of-data-breach-statistics)
+66. [Cost of a Data Breach Report 2025 The AI Oversight Gap think report](https://www.bakerdonelson.com/webfiles/Publications/20250822_Cost-of-a-Data-Breach-Report-2025.pdf)
