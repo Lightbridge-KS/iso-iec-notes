@@ -1,0 +1,638 @@
+---
+title: "Application Logging Guideline: Thai PDPA & Computer Crime Act"
+subtitle: "แนวทางการจัดเก็บ Log สำหรับการพัฒนาแอปพลิเคชัน ตาม พ.ร.บ. คุ้มครองข้อมูลส่วนบุคคล พ.ศ. 2562 และ พ.ร.บ. ว่าด้วยการกระทำความผิดเกี่ยวกับคอมพิวเตอร์ พ.ศ. 2550 (แก้ไขเพิ่มเติม พ.ศ. 2560)"
+---
+
+| Item | Value |
+|---|---|
+| Version | 1.0 (draft for internal review) |
+| Date | 2026-11-16 |
+| Audience | Developers, tech leads, DevOps / SRE, QA |
+| Applies to | Web apps, APIs, mobile back-ends, AI/ML services, internal tools |
+| Owner | (fill in: tech lead / security officer) |
+| Reviewed by | (fill in: DPO / legal) |
+
+> **Disclaimer.** This is an engineering guideline, not legal advice. It summarises the law as found in public sources up to November 2026. Before release, have your **DPO / legal team** confirm the classification of your system, the retention periods, and the legal basis for each log. Where this document says **"Law"**, it restates a legal requirement; where it says **"Recommended"**, it is engineering good practice that you may tune.
+
+---
+
+## 0. TL;DR — 12 golden rules
+
+| # | Rule | Source |
+|---|---|---|
+| 1 | Keep **traffic / access logs for at least 90 days** from the day each record enters the system. Be able to extend retention for specific users up to **2 years** when an official orders it. | Law — CCA s.26; MDES Notification 2564 ข้อ 12 |
+| 2 | Every log about a user action must identify a **real individual** (authenticated user ID), not just an IP address — including behind NAT, proxies, and Wi-Fi hotspots. | Law — MDES 2564 ข้อ 9(4) |
+| 3 | Log the **11 event types** in Annex ข (identity, activities, log-on/off, devices, access attempts, resource access, apps, files, network/protocol, security-control on/off, transactions). | Law — MDES 2564 Annex ข |
+| 4 | Keep a **PDPA audit trail**: who accessed, changed, deleted, or transferred which personal data, when, and from where. | Law — PDPC Security Measures Notification 2565 |
+| 5 | **Never** log secrets or sensitive data: passwords, tokens, national ID numbers, clinical content, images. Use pseudonymous IDs. | Law — PDPA s.22 (minimisation), s.26 (sensitive data) |
+| 6 | Store timestamps in **UTC (ISO 8601)** and sync every clock via NTP to a source traceable to international reference time. | Law — MDES 2564 ข้อ 11 |
+| 7 | Ship logs to a **central, append-only store**. Developers and sysadmins must **not** be able to edit stored logs. | Law — MDES 2564 ข้อ 9(1)–(2) |
+| 8 | **Log access to the logs** (admin/operator access is itself logged). | Law — MDES 2564 Annex ข (ค) |
+| 9 | Encrypt logs in transit and at rest; restrict access by role (least privilege, need-to-know). | Law — PDPA s.37(1) + PDPC 2565 |
+| 10 | Set a **retention period per log class** and **auto-delete** when it expires, unless under legal hold. | Law — PDPA s.37(3) |
+| 11 | Record logging activities in the **ROPA** and document the legal basis (usually s.24(6) legal obligation for traffic logs). | Law — PDPA s.39 |
+| 12 | Logs are your breach evidence: the controller must notify the PDPC **within 72 hours** of becoming aware of a breach. | Law — PDPA s.37(4) |
+
+---
+
+## 1. Scope and key terms
+
+This guideline covers **logs produced by applications we build**: authentication events, API access, user actions, audit trails, security events, and diagnostic (debug/error) logs. Network-device logs (firewall, RADIUS, Wi-Fi controller) are usually owned by central IT; this guideline tells you how your application logs must **fit together** with them.
+
+| Term | Meaning in this document |
+|---|---|
+| **CCA** | Computer Crime Act — พ.ร.บ. ว่าด้วยการกระทำความผิดเกี่ยวกับคอมพิวเตอร์ พ.ศ. 2550 and Amendment (No. 2) พ.ศ. 2560 |
+| **MDES 2564** | ประกาศกระทรวงดิจิทัลเพื่อเศรษฐกิจและสังคม เรื่อง หลักเกณฑ์การเก็บรักษาข้อมูลจราจรทางคอมพิวเตอร์ของผู้ให้บริการ พ.ศ. 2564 (published 13 Aug 2021, in force 14 Aug 2021; replaced the 2550 notification) |
+| **PDPA** | พ.ร.บ. คุ้มครองข้อมูลส่วนบุคคล พ.ศ. 2562 (fully in force 1 June 2022) |
+| **PDPC 2565 (Security)** | ประกาศคณะกรรมการคุ้มครองข้อมูลส่วนบุคคล เรื่อง มาตรการรักษาความมั่นคงปลอดภัยของผู้ควบคุมข้อมูลส่วนบุคคล พ.ศ. 2565 (in force 21 June 2022) |
+| **Traffic data** (ข้อมูลจราจรทางคอมพิวเตอร์) | Data about a communication through a computer system: origin, source, destination, route, time, date, volume, duration, type of service, etc. (CCA s.3) |
+| **Service provider** (ผู้ให้บริการ) | (1) Anyone who lets others access the internet or communicate through a computer system, for itself or for others; (2) anyone who stores computer data for the benefit of others. (CCA s.3; MDES 2564 ข้อ 4–5) |
+| **Audit trail** | A record of who accessed / changed / deleted / transferred personal data (PDPC 2565) |
+| **Data controller / processor** | ผู้ควบคุมข้อมูลส่วนบุคคล / ผู้ประมวลผลข้อมูลส่วนบุคคล (PDPA s.6) |
+
+---
+
+## 2. Legal background
+
+### 2.1 Computer Crime Act — what it requires
+
+**Section 26 (as amended 2560)** — Law:
+
+- A service provider must keep traffic data **for at least 90 days** from the day it enters the computer system.
+- When necessary, a competent official (พนักงานเจ้าหน้าที่) may order a specific provider to keep the data **longer than 90 days but no more than 2 years**, case by case. *(The 2550 original said 1 year; the 2560 amendment raised it to 2 years.)*
+- The provider must also keep **user (subscriber) data, as necessary to identify the user** from the start of service, and keep it at least 90 days after the service ends.
+- Failure to comply: **fine up to 500,000 baht**.
+
+**Section 18** — officials may order a provider to hand over, or to preserve, traffic and user data. See [§10](#handling-requests-for-logs).
+
+### 2.2 MDES Notification 2564 — how to keep traffic data
+
+| Clause | Requirement (summary) | Engineering impact |
+|---|---|---|
+| ข้อ 5 | Two groups of providers. **5(1)** gives access/communication to the public: telecom, ISPs (incl. **organisational networks** such as government agencies, companies, schools), hosting, internet cafés, app stores / messaging, social media. **5(2)** stores data for others: (ก) content/application providers, (ข) cloud (IaaS/PaaS/SaaS), (ค) **digital service providers using networks as part of their service — finance, health, education, e-commerce, etc.** | Decide which group your system belongs to → which Annex ข field list applies. See [§3](#step-1-classify-your-system). |
+| ข้อ 6–7 | The traffic data to keep is defined per provider type in **Annex ข (ภาคผนวก ข)**. | Use the schema in [§5](#what-to-log-canonical-schema). |
+| ข้อ 8 | Provide a **digital identity proofing and authentication** system for every user, meeting ETDA's minimum assurance levels. Access control safeguards (administrative, technical, physical) must cover at least: access control to data and equipment, rules for granting access, user access management, user responsibilities, and **audit of access, change, deletion and transfer**. | SSO / OIDC, MFA for privileged users, RBAC, audit trail. |
+| ข้อ 9(1) | Store on media/systems that **preserve integrity** and **identify who accesses** the logs. | Centralised log store with access logging. |
+| ข้อ 9(2) | Keep logs confidential with access classification; **system administrators must not be able to alter stored logs** (e.g., centralised log server, archiving, hashing). Only authorised persons (e.g., IT auditors, competent officials) may access. | Append-only / WORM storage; separation of duties; hashing. |
+| ข้อ 9(3) | Appoint a **liaison person** to hand data to officials promptly. | Name a log custodian; document the export procedure. |
+| ข้อ 9(4) | Logs must identify users **truly individually** (เป็นรายบุคคลได้จริง), even with proxy, NAT, proxy cache, free internet, or Wi-Fi hotspot. | Always log authenticated `user_id`; log real client IP behind reverse proxies. |
+| ข้อ 10 | If a third party stores the data for you, **you remain responsible** for retention and production on demand. | Contract terms with cloud/log vendors. |
+| ข้อ 11 | Set the clocks of all service equipment to **international reference time (Stratum 0)** and keep them synchronised with related equipment. | NTP everywhere; UTC timestamps. See [§7](#time-and-clock-synchronisation). |
+| ข้อ 12 | Keep **≥ 90 days** from entry into the system. For a suspected offence, national security, terrorism, transnational crime, etc., an official may order extended retention for a specific provider/user — **up to 6 months per order, max 2 years total**. | Retention policy + legal-hold capability. |
+| ข้อ 13 | Transition: digital service providers under 5(2)ค got **180 days**; internet cafés got 1 year; others applied from 14 Aug 2021. | Already expired — fully applicable now. |
+| Annex ข | **General standards for all providers**: event logging (11 items), log protection, logging of admin access to logs, clock synchronisation. Providers whose systems cannot fully collect the required data may ask a competent official for an exemption. | See [§5.1](#the-11-annex-ข-event-types). |
+
+### 2.3 PDPA — what it requires of logs
+
+**Logs are personal data.** A user ID, IP address, device ID, timestamp, or behaviour pattern that relates to an identifiable person is personal data. The PDPC's *Guidelines on Personal Data Protection in the Development and Use of AI* (advisory; reported October 2026) explicitly list logs and usage records (IP addresses, access times, behavioural patterns) as potentially personal data that must be included in data mapping.
+
+| PDPA provision | What it means for logging |
+|---|---|
+| **s.22** — collect only what is necessary | Don't log fields "just in case". Every field needs a purpose. |
+| **s.24** — lawful basis | Traffic logs required by CCA → **s.24(6) legal obligation**. Security/diagnostic logs → usually **s.24(5) legitimate interest** (document a Legitimate Interest Assessment). |
+| **s.26** — sensitive data (incl. health data) | Much stricter basis; legitimate interest is **not** available. → **Keep health data out of logs.** |
+| **s.37(1)** — appropriate security measures, reviewed when needed or when technology changes | Logs must be protected like any personal data, and logs are themselves a required security control (audit trail). |
+| **s.37(3)** — a system to delete/destroy data when retention expires, when no longer necessary, on request, or on consent withdrawal | Automatic retention-based purge for every log class. |
+| **s.37(4)** — notify the PDPC **without delay, within 72 hours** of becoming aware of a breach (unless no risk); notify data subjects too if high risk | Logs must be good enough to scope a breach fast. |
+| **s.39** — Record of Processing Activities (ROPA) | Logging is a processing activity → list it in ROPA with purpose, basis, retention, security measures. |
+| **s.40** — processor duties | Log vendors (SIEM/SaaS) are processors → need a DPA. |
+| **s.28–29** — cross-border transfer | Sending logs to an overseas SaaS is a cross-border transfer. |
+
+**PDPC Security Measures Notification 2565 — minimum conditions** (Law):
+
+1. Cover all personal data processing, paper or electronic.
+2. Combine **organisational, technical, and physical** measures, scaled to risk.
+3. Cover risk identification, prevention, **detection/monitoring**, response, and recovery.
+4. Protect **confidentiality, integrity, availability**.
+5. For electronic processing: cover all IT components and use **multiple layers** of controls.
+6. For access, use, alteration, correction, or disclosure of personal data, at minimum: **access control, identity proofing and authentication, user access management, user responsibilities, and audit trails**.
+7. Awareness policies for personnel.
+
+Also: the controller must require processors to meet the same standard, processors must report breaches to the controller, and security requirements under other laws cannot fall below this notification.
+
+**Penalties** (for context): administrative fines up to **1 / 3 / 5 million baht** depending on the provision (failures under s.37 — security measures and breach notification — fall in the **up-to-3-million** tier; sensitive-data violations up to 5 million), plus criminal penalties (up to 1 year imprisonment and/or 1 million baht for certain sensitive-data offences) and civil damages up to 2× actual damages.
+
+**Enforcement is real.** On 1 Aug 2025 the PDPC announced eight administrative fines in five cases, against both public and private organisations. The recurring failures were **inadequate security measures, no breach notification, and no DPO**. One case was a private hospital fined about 1.21 million baht after a contractor mishandled patient records during disposal.
+
+### 2.4 Reconciling the two laws
+
+The CCA says *"keep it and make it identifiable"*; the PDPA says *"minimise it, protect it, and delete it on time"*. They are compatible if you **separate log classes**:
+
+```
+                  ┌──────────────────────────────┐
+                  │         Your application      │
+                  └──────────────┬───────────────┘
+                                 │ structured events (JSON)
+          ┌──────────────────────┼───────────────────────────┐
+          ▼                      ▼                           ▼
+ ┌─────────────────┐   ┌──────────────────┐        ┌──────────────────┐
+ │ A. Traffic /    │   │ B. PDPA audit    │        │ D. Diagnostic    │
+ │    access logs  │   │    trail         │        │    (debug/error) │
+ │ CCA s.26        │   │ PDPC 2565        │        │ PDPA s.22, 37(3) │
+ │ basis: 24(6)    │   │ basis: 24(6)     │        │ basis: 24(5)     │
+ │ keep ≥ 90 days  │   │ keep per policy  │        │ keep short       │
+ │ identifiable    │   │ pseudonymise     │        │ no personal data │
+ └────────┬────────┘   └────────┬─────────┘        └────────┬─────────┘
+          │                     │                           │
+          └──────────┬──────────┴───────────┬───────────────┘
+                     ▼                      ▼
+        ┌──────────────────────┐  ┌──────────────────────────┐
+        │ Central log store    │  │ E. Meta-audit: who read  │
+        │ append-only / WORM   │──│    or exported the logs  │
+        │ encrypted, RBAC, UTC │  └──────────────────────────┘
+        └──────────────────────┘
+```
+
+> **Principle:** *identifiable where the law requires it, minimal everywhere else.*
+
+---
+
+## 3. Step 1 — Classify your system
+
+Answer this **before design review**; record the answer in the system's architecture doc and ROPA entry.
+
+```
+Q1. Does the system let users connect/communicate through it,
+    OR store data on behalf of users?
+        │
+        ├── No  ──► CCA traffic-data duty probably does not apply to this system
+        │           (central IT may still have duties for the network).
+        │           PDPA still applies if it processes personal data. ──► go to §4
+        │
+        └── Yes ──► You (or your organisation) are a "ผู้ให้บริการ".
+                    │
+                    Q2. Who are the users and how do they connect?
+                    │
+                    ├── Staff on the organisation's network / VPN / SSO
+                    │     └─► 5(1)ข organisational network access.
+                    │         Central IT keeps network/RADIUS logs.
+                    │         YOUR APP must still log: auth events, user ID,
+                    │         client IP, session times  (Annex ข §2 + general standards)
+                    │
+                    ├── Patients / public over the internet
+                    │   (portal, telehealth, mobile app, result download, chatbot)
+                    │     └─► 5(2)ค digital service provider (health sector).
+                    │         Keep the 8 fields in §5.2 + general standards.
+                    │
+                    ├── You host apps/files/mail for other units
+                    │     └─► 5(1)ค hosting / 5(2)ข cloud — talk to IT security.
+                    │
+                    └── Web board / chat / user-generated content
+                          └─► 5(2)ก content provider — also log the author of each post.
+```
+
+> **Note.** MDES 2564 does not name hospitals specifically; it lists *health* as a digital-service sector and *government agencies* as an example of organisational network providers. Treat the classification as a legal question and confirm it with your DPO/legal team.
+
+---
+
+## 4. Log classes
+
+| Class | Purpose | Typical events | Legal driver | Lawful basis | Who may read |
+|---|---|---|---|---|---|
+| **A. Traffic / access** | Identify who used the service, when, from where | Login/logout, token refresh, session start/end, API calls (metadata only), failed logins | CCA s.26, MDES 2564 | s.24(6) | Security team, log custodian; officials on lawful request |
+| **B. PDPA audit trail** | Accountability for personal-data access | View / create / update / delete / export / print / share of a person's record; consent changes; DSAR handling | PDPC 2565 (audit trails), PDPA s.37(1) | s.24(6) | DPO, security, internal audit |
+| **C. Security events** | Detect and respond to attacks | Brute force, MFA failures, privilege/role changes, config changes, AV/IDS on/off, WAF blocks | PDPA s.37(1); MDES Annex ข item 10 | s.24(6) / s.24(5) | SOC / security team |
+| **D. Diagnostic** | Debugging, performance | Errors, stack traces, latency, job status | — (minimise: PDPA s.22) | s.24(5) | Dev team (masked data only) |
+| **E. Meta-audit** | Oversight of log access | Who searched, viewed, exported, or changed retention of logs | MDES Annex ข (ค), ข้อ 9(1) | s.24(6) | Internal audit only |
+
+> **Rule of thumb:** classes A–C and E go to the **compliance log store**; class D goes to the **ops/observability stack** with short retention. Use a `log_class` field on every record so routing and retention are automatic.
+
+---
+
+## 5. What to log — canonical schema
+
+### 5.1 The 11 Annex ข event types
+
+MDES 2564 Annex ข requires these for **all** providers. Map each one to concrete fields:
+
+| # | Annex ข item (TH keyword) | What to capture | Canonical fields |
+|---|---|---|---|
+| 1 | User identification (ระบุตัวตนผู้ใช้) | Authenticated, stable user identifier | `actor.user_id`, `actor.auth_method`, `actor.roles` |
+| 2 | System activities (กิจกรรมในระบบ) | What the user did | `event`, `action`, `resource.type`, `resource.id` |
+| 3 | Key events with date/time (เหตุการณ์สำคัญ/วันเวลา) | Log-on, log-off, session timeout | `ts`, `event = auth.login / auth.logout / session.expired` |
+| 4 | System/device/location (ระบบ/อุปกรณ์/สถานที่) | Host, device, app instance, location of access | `service`, `host`, `src.device_id`, `src.user_agent` |
+| 5 | Access attempts (การเข้าถึง) | Successful **and rejected** logins | `event = auth.login`, `outcome = success / failure`, `reason` |
+| 6 | Resource access (แหล่งข้อมูล) | Successful **and failed** access to data resources | `event = resource.access`, `outcome`, `http.status` |
+| 7 | Applications & utilities (แอปพลิเคชัน) | Which app/tool was used | `service`, `client.app_id`, `client.version` |
+| 8 | Files accessed (ไฟล์ที่ถูกเข้าถึง) | File/data type and kind of access | `resource.type = file`, `resource.id`, `action = read / write / download` |
+| 9 | Network address & protocol (ที่อยู่เครือข่าย/โปรโตคอล) | Source/destination IP, port, protocol | `src.ip`, `src.port`, `dst.host`, `dst.port`, `network.protocol` |
+| 10 | Security protections on/off (มาตรการป้องกันภัยไซเบอร์) | AV, IDS/IPS, WAF, MFA policy toggled | `event = security.control_changed`, `control`, `new_state` |
+| 11 | Application transactions (ธุรกรรม) | Business transactions in the app | `event = txn.*`, `txn.id`, `outcome` |
+
+### 5.2 Extra fields for 5(2)ค digital service providers (e.g., patient-facing health apps)
+
+Annex ข section 5(ค) lists:
+
+1. Access logs from authentication/authorisation servers (e.g., TACACS, RADIUS, DIAMETER — for apps: your IdP / OIDC server)
+2. Date and time of connection between client and server
+3. User ID
+4. Assigned IP address
+5. Calling line identification (if a phone-number-based service)
+6. IP address of the client connected to the server
+7. User ID or other identifier, **plus email address or social-media account** used to sign in
+8. Records of digital service usage
+
+### 5.3 Common envelope (every record)
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `ts` | string (ISO 8601, UTC, ms) | ✅ | e.g., `2026-11-16T06:03:12.345Z` |
+| `log_class` | enum `access / audit / security / diagnostic / meta` | ✅ | Drives routing and retention |
+| `event` | string, dot-namespaced | ✅ | `auth.login`, `patient_record.view`, `security.role_changed` |
+| `outcome` | enum `success / failure / denied / error` | ✅ | |
+| `service`, `env`, `version` | string | ✅ | `example-viewer`, `prod`, `1.4.2` |
+| `host` | string | ✅ | Container/pod/VM name |
+| `actor.user_id` | string | ✅ when authenticated | Stable internal ID, **not** email/name |
+| `actor.roles` | array | Recommended | At time of event |
+| `session_id` | string | ✅ for user sessions | Opaque; never the session token itself |
+| `src.ip` | string | ✅ | Real client IP (see below) |
+| `src.port`, `src.user_agent`, `src.device_id` | string | Recommended | |
+| `request_id`, `trace_id` | string | ✅ | Correlate across services |
+| `http.method`, `http.route`, `http.status` | string/int | ✅ for HTTP | Use the **route template** (`/patients/{id}`), not the raw URL |
+| `resource.type`, `resource.id` | string | ✅ for audit | |
+| `subject.pid` | string | ✅ for audit | **Pseudonymised** data-subject ID (HMAC) |
+| `purpose` | string | Recommended for audit | `clinical_care`, `research_approved`, `support_ticket` |
+| `reason` | string | ✅ on failure | `bad_password`, `mfa_failed`, `forbidden` |
+
+**Real client IP behind a reverse proxy / load balancer** (ข้อ 9(4)): log the client IP from `X-Forwarded-For` / `Forwarded` **only when set by your trusted proxy**, and keep the proxy's own address in `src.proxy_ip`. Otherwise every request looks like it came from the load balancer.
+
+### 5.4 Examples
+
+**A. Traffic/access — login**
+
+```json
+{
+  "ts": "2026-11-16T06:03:12.345Z",
+  "log_class": "access",
+  "event": "auth.login",
+  "outcome": "success",
+  "service": "example-viewer", "env": "prod", "version": "1.4.2", "host": "viewer-7c9f",
+  "actor": { "user_id": "u_01HF8K2Z", "auth_method": "oidc+mfa", "roles": ["radiologist"] },
+  "session_id": "s_9a1e4c",
+  "src": { "ip": "10.12.3.45", "port": 52311, "proxy_ip": "10.0.0.5",
+           "user_agent": "Mozilla/5.0 ...", "device_id": "d_77b2" },
+  "dst": { "host": "viewer.internal", "port": 443 },
+  "network": { "protocol": "https" },
+  "request_id": "req_01HF8K30"
+}
+```
+
+**B. PDPA audit trail — viewing a patient's study**
+
+```json
+{
+  "ts": "2026-11-16T06:05:40.120Z",
+  "log_class": "audit",
+  "event": "imaging_study.view",
+  "outcome": "success",
+  "service": "example-viewer", "env": "prod",
+  "actor": { "user_id": "u_01HF8K2Z", "roles": ["radiologist"] },
+  "subject": { "pid": "8c700930902c4c76" },
+  "resource": { "type": "imaging_study", "id": "st_789" },
+  "action": "read",
+  "purpose": "clinical_care",
+  "src": { "ip": "10.12.3.45" },
+  "session_id": "s_9a1e4c",
+  "request_id": "req_01HF8K41"
+}
+```
+
+**C. Security event — role change**
+
+```json
+{
+  "ts": "2026-11-16T07:10:02.004Z",
+  "log_class": "security",
+  "event": "security.role_changed",
+  "outcome": "success",
+  "actor": { "user_id": "u_admin_02" },
+  "target": { "user_id": "u_01HF8K2Z" },
+  "change": { "added": ["admin"], "removed": [] },
+  "src": { "ip": "10.12.9.8" },
+  "request_id": "req_01HF9A10"
+}
+```
+
+---
+
+## 6. What NOT to log
+
+| ❌ Never log | ✅ Log this instead |
+|---|---|
+| Passwords, OTPs, PINs, secret answers | `outcome` + `reason` |
+| Access/refresh tokens, session cookies, API keys, JWTs | `session_id` (opaque), token `jti` or hash prefix |
+| Thai national ID (13 digits), passport no. | Internal `user_id` or pseudonymised `subject.pid` |
+| Patient name, HN, date of birth, address, phone, email (in diagnostic logs) | `subject.pid` (HMAC); email only in class A where 5(2)ค requires it |
+| Clinical content: diagnoses, report text, lab values, notes, ICD codes | `resource.type` + `resource.id` |
+| Medical images, DICOM headers/pixel data, uploaded files | `resource.id`, file size, hash |
+| Full request/response bodies | Selected, allow-listed fields |
+| Raw URLs with query strings (`?hn=...&name=...`) | `http.route` template |
+| AI prompts / model inputs & outputs containing personal data | Prompt ID, token counts, model version, guardrail outcome |
+| Biometrics, religion, ethnicity, other s.26 data | Nothing — it should never reach a log |
+| Bank/card numbers | Last 4 digits at most, if justified |
+
+**Controls, in order of strength:**
+
+1. **Design**: log by *allow-list* (structured fields you chose), never by dumping objects.
+2. **Types**: wrap sensitive values in types whose `__repr__` / `ToString()` returns `[REDACTED]`.
+3. **Pseudonymise** subject identifiers with a keyed hash (HMAC-SHA-256, key in a secrets manager, rotated per policy). The same person maps to the same token, so investigations still work.
+4. **Redaction filter** as a safety net (regex for national ID, phone, email, bearer tokens). It is **not** the primary control.
+5. **Tests**: unit tests that assert known PII never appears in emitted log lines; scan log samples in CI/staging.
+
+---
+
+## 7. Time and clock synchronisation
+
+**Law (MDES 2564 ข้อ 11):** set the clocks of all service equipment to international reference time (Stratum 0) and keep them synchronised with related equipment.
+
+**How to do it (Recommended):**
+
+- *Stratum 0* is a reference clock (atomic clock / GNSS). Over a network you sync to **Stratum-1 servers** attached to it. Thailand's national time standard, UTC(NIMT), is maintained by the National Institute of Metrology (สถาบันมาตรวิทยาแห่งชาติ), which publishes NTP servers `time1.nimt.or.th` … `time5.nimt.or.th`.
+- Run an internal NTP/chrony tier (2+ servers) that syncs to NIMT (and one other trusted source); point all hosts, containers' hosts, DB servers, and network devices at it.
+- **Store** every timestamp in **UTC**, ISO 8601, millisecond precision (`...Z`). **Display** in Asia/Bangkok (UTC+07:00) in UIs and reports.
+- Never use the client's clock as the record time; at most store it as `client_ts` next to the server `ts`.
+- Monitor clock offset (alert if > 1 s) and log NTP sync failures as class C security events.
+
+---
+
+## 8. Integrity, confidentiality, and access control
+
+```
+ App / API ──► local agent (buffer, TLS) ──► Log collector ──► Compliance log store
+ (stdout JSON)   (no local long-term files)    (parse, route)    • append-only / WORM (object lock)
+                                                                 • encrypted at rest (KMS)
+                                                                 • daily hash manifest / hash chain
+                                                                 • RBAC, MFA for all users
+                                                                 • every query/export logged (class E)
+                                                  └──────────► Ops store (class D, short retention)
+```
+
+**Law (MDES 2564 ข้อ 9; PDPC 2565):**
+
+- Integrity-preserving storage that identifies who accessed it.
+- Confidentiality with access classification; **administrators cannot alter stored logs**.
+- Log admin/operator access to logs.
+
+**Recommended implementation:**
+
+- **Separation of duties**: app developers and server admins have *no* delete/modify rights on the compliance store; only the log custodian can change retention, and that change is itself logged.
+- **Tamper evidence**: use WORM/object-lock storage where available; additionally produce a daily SHA-256 manifest of log segments (or a hash chain) and keep it in a separate system.
+- **Transport**: TLS from agent to collector; mutual TLS for collectors; no plaintext syslog over untrusted networks.
+- **Encryption at rest** with managed keys; restrict key access to the log platform.
+- **Access**: RBAC by log class, MFA, named accounts only (no shared admin), need-to-know queries. Review access quarterly.
+- **Availability**: logs must survive a host compromise — ship off-host in near real time; alert on ingestion gaps.
+
+---
+
+## 9. Retention and deletion
+
+| Class | Minimum (Law) | Recommended setting | Deletion |
+|---|---|---|---|
+| **A. Traffic / access** | **≥ 90 days** from entry (CCA s.26; MDES ข้อ 12) | Fixed, documented period — e.g., **90–180 days**. Longer only with written justification in ROPA. | Auto-purge after period, unless on legal hold |
+| **B. PDPA audit trail** | Not specified by law | Per organisational retention policy, e.g., **1–2 years**, justified in ROPA (supports complaint/incident investigation) | Auto-purge |
+| **C. Security events** | ≥ 90 days if they are also traffic data | **≥ 1 year** for incident-related events; others 90–180 days | Auto-purge |
+| **D. Diagnostic** | None | **14–30 days** | Auto-purge (PDPA s.37(3)) |
+| **E. Meta-audit** | Same as the logs it covers | ≥ the longest class it covers | Auto-purge |
+| **Legal hold** | On official order: **up to 6 months per order, max 2 years total** (MDES ข้อ 12; CCA s.26) | Hold **only** the users/time ranges named in the order | Release and purge when the order ends |
+
+**Implementation notes:**
+
+- Retention is enforced by the **log platform** (index lifecycle / bucket lifecycle rules), not by a cron script on an app server.
+- Legal hold must be **selective** (by user ID / time range) — do not freeze everything.
+- Backups of logs follow the same retention; expired logs must also disappear from backups within a defined window.
+- Document each period in ROPA and in the privacy notice where relevant.
+
+---
+
+## 10. Handling requests for logs
+
+**From competent officials (CCA s.18):**
+
+1. Requests go to the designated **liaison / log custodian** (MDES ข้อ 9(3)), never directly to a developer.
+2. Verify the official's identity and written order; involve legal/DPO.
+3. Export only the scope ordered; produce a hash of the export; record the disclosure (who, what, when, legal basis) as a class E event.
+4. Apply a legal hold if a preservation order is included.
+
+**From data subjects (PDPA rights):**
+
+- Access requests may cover logs about the person — be able to search by user ID / pseudonym.
+- Erasure requests can generally be declined for logs you must keep by law (e.g., class A within its retention period); document the reason and still delete when retention ends.
+
+---
+
+## 11. Incidents and breach notification
+
+- Logs are your primary evidence for **scoping** a breach: which accounts, which records, which time window.
+- **Law**: the controller notifies the PDPC without delay, **within 72 hours** of becoming aware, unless the breach is unlikely to affect rights and freedoms; if the risk is high, also notify affected data subjects with remedies (PDPA s.37(4); PDPC Breach Notification Notification, 15 Dec 2022).
+- Processors (including log vendors) must notify the controller of breaches.
+- **A leak of the logs themselves is a personal-data breach.** This is another reason to keep personal data out of diagnostic logs.
+
+**Recommended:** pre-built SIEM queries for "all records accessed by user X between T1–T2" and "all users who accessed subject P", tested at least yearly in a tabletop exercise.
+
+---
+
+## 12. Vendors, cloud, and data processors
+
+- **You remain responsible** for retention and production of traffic data even if a third party stores it (MDES ข้อ 10).
+- Sign a **data processing agreement** (PDPA s.40; PDPC 2565) covering: security measures, breach notification to you, sub-processors, retention/deletion, return of data, audit rights, and no secondary use (e.g., no training on your logs).
+- If the logging/APM SaaS stores data **outside Thailand**, handle it as a cross-border transfer (PDPA s.28–29) and record it in ROPA.
+- Check that the vendor can provide WORM/immutability, per-class retention, legal hold, and access logs.
+
+---
+
+## 13. Healthcare and AI notes
+
+- **Health data is sensitive data (PDPA s.26).** Treat any log that could reveal a diagnosis, test, or report content as a sensitive-data leak. Keep identifiers pseudonymised and content out.
+- Even an audit line "user X viewed patient P's study" reveals that P is a patient. Pseudonymise `subject.pid`, restrict class B access, and get your DPO to confirm the basis.
+- **DICOM / PACS**: never log DICOM headers or pixel data; log Study/Series Instance UIDs only if they are not themselves linkable outside the system, otherwise map them to internal IDs.
+- **AI services** (per the PDPC AI guideline, 2026, advisory): prompts, inputs, outputs, and interaction logs can be personal data; keep forensic-capable logs of who used the model, which model version, and guardrail outcomes — but not the raw clinical content. Use legitimate interest only with a documented LIA, and never for sensitive data.
+
+---
+
+## 14. Implementation reference (Python)
+
+Tested with Python 3.11+. Adapt the same pattern to .NET (Serilog destructuring policies), Dart, or R.
+
+```python
+import hashlib
+import hmac
+import json
+import logging
+import os
+import re
+from datetime import datetime, timezone
+
+# --- 1) Pseudonymisation --------------------------------------------------
+# Keyed hash (HMAC): the same subject always maps to the same token,
+# but it cannot be reversed or brute-forced without the secret key.
+_PSEUDO_KEY = os.environ["LOG_PSEUDONYM_KEY"].encode()   # from a secrets manager
+
+def pseudonymize(value: str) -> str:
+    return hmac.new(_PSEUDO_KEY, value.encode(), hashlib.sha256).hexdigest()[:16]
+
+# --- 2) Redaction filter: safety net, NOT the primary control -------------
+_REDACT = [
+    (re.compile(r"\b\d{13}\b"), "[REDACTED_TH_ID]"),                 # Thai national ID
+    (re.compile(r"\b0\d{8,9}\b"), "[REDACTED_PHONE]"),               # Thai phone numbers
+    (re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+"), "[REDACTED_EMAIL]"),
+    (re.compile(r"(?i)bearer\s+[\w.\-~+/]+=*"), "Bearer [REDACTED]"),
+    (re.compile(r"(?i)\b(password|passwd|pwd|secret|token)=([^&\s]+)"), r"\1=[REDACTED]"),
+]
+
+class RedactFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        for pattern, repl in _REDACT:
+            msg = pattern.sub(repl, msg)
+        record.msg, record.args = msg, ()
+        return True
+
+# --- 3) Structured audit event (class B) ----------------------------------
+audit_logger = logging.getLogger("audit")
+
+def audit(event: str, *, actor_id: str, action: str, outcome: str,
+          src_ip: str, resource_type: str, resource_id: str,
+          subject_id: str | None = None, purpose: str | None = None,
+          request_id: str | None = None) -> None:
+    record = {
+        "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+        "log_class": "audit",
+        "event": event,
+        "actor": {"user_id": actor_id},
+        "subject": {"pid": pseudonymize(subject_id)} if subject_id else None,
+        "resource": {"type": resource_type, "id": resource_id},
+        "action": action,
+        "purpose": purpose,
+        "outcome": outcome,
+        "src": {"ip": src_ip},
+        "request_id": request_id,
+    }
+    audit_logger.info(json.dumps(record, ensure_ascii=False))
+
+# --- 4) Tamper-evidence concept: hash chain --------------------------------
+# Prefer WORM storage in production; a hash chain/manifest adds evidence
+# that nothing was removed or edited.
+def chain(entries: list[dict]) -> list[dict]:
+    prev, out = "0" * 64, []
+    for e in entries:
+        payload = json.dumps(e, sort_keys=True, ensure_ascii=False)
+        h = hashlib.sha256((prev + payload).encode()).hexdigest()
+        out.append({**e, "prev_hash": prev, "hash": h})
+        prev = h
+    return out
+
+# Usage
+# app_log = logging.getLogger("app"); app_log.addFilter(RedactFilter())
+# audit("imaging_study.view", actor_id="u_123", action="read", outcome="success",
+#       src_ip=client_ip, resource_type="imaging_study", resource_id="st_789",
+#       subject_id=hn, purpose="clinical_care", request_id=req_id)
+```
+
+Example redaction result:
+
+```
+in : login ok for somchai@example.com id=1103700012345 phone 0812345678 token=abc.def
+out: login ok for [REDACTED_EMAIL] id=[REDACTED_TH_ID] phone [REDACTED_PHONE] token=[REDACTED]
+```
+
+---
+
+## 15. Checklists
+
+### Design review
+
+- [ ] System classified under CCA / MDES 2564 (§3), confirmed by DPO/legal
+- [ ] Log classes A–E identified; each event mapped to a class
+- [ ] Field list per class approved (allow-list); no s.26 data in any class
+- [ ] Lawful basis per class recorded; ROPA entry drafted (purpose, basis, retention, recipients, security, cross-border)
+- [ ] Retention period per class decided and documented
+- [ ] Identity: SSO/OIDC; MFA for privileged roles; digital ID assurance level considered for public users (MDES ข้อ 8)
+
+### Build
+
+- [ ] Structured JSON logging with the common envelope (§5.3)
+- [ ] All 11 Annex ข event types emitted where applicable (§5.1); 5(2)ค fields if patient/public-facing (§5.2)
+- [ ] Audit events for view/create/update/delete/export/print/share of personal data
+- [ ] Failed and denied attempts logged, not just successes
+- [ ] Real client IP from trusted proxy headers only
+- [ ] Pseudonymisation helper used for subject IDs; key from secrets manager
+- [ ] Redaction filter installed; unit tests assert no PII/secrets in logs
+- [ ] UTC timestamps, ms precision; no client clock as record time
+
+### Deploy / platform
+
+- [ ] All hosts synced via NTP to internal tier → NIMT / Stratum-1; offset monitoring
+- [ ] Logs shipped off-host over TLS; ingestion-gap alerting
+- [ ] Compliance store append-only/WORM, encrypted, RBAC + MFA; devs/admins cannot modify or delete
+- [ ] Access to logs logged (class E)
+- [ ] Lifecycle rules enforce retention per class; selective legal-hold capability tested
+- [ ] Vendor DPA signed; cross-border transfer assessed
+
+### Operate
+
+- [ ] Log custodian / liaison named; official-request procedure documented
+- [ ] Quarterly access review of log platform users
+- [ ] Yearly breach tabletop using real log queries (72-hour clock)
+- [ ] Re-review security measures after incidents or major tech changes (PDPA s.37(1), PDPC 2565)
+- [ ] Periodic sample scan of production logs for leaked PII
+
+---
+
+## 16. Related laws and things to watch
+
+| Item | Why it may matter |
+|---|---|
+| **Cybersecurity Act B.E. 2562** (พ.ร.บ. การรักษาความมั่นคงปลอดภัยไซเบอร์) | Public health is a Critical Information Infrastructure (CII) sector; CII organisations follow NCSA (สกมช.) codes of practice, which include monitoring and logging. Check with IT security whether your organisation is designated. |
+| **ETDA digital identity standards** | MDES 2564 ข้อ 8 points to ETDA's minimum identity-assurance levels for user identity proofing/authentication. |
+| **PDPC AI guideline (2026, advisory)** | Treats AI interaction logs as personal data; recommends forensic-capable logging. |
+| **PDPC breach notification notification (2022)** and the electronic reporting-channel notification (2025) | Format and channel for 72-hour notifications. |
+| **Emergency Decree on Technology Crime Prevention (No. 2) B.E. 2568** (in force 13 Apr 2025) | Mainly targets banks, telcos, and platforms in online-scam cases; check with legal whether any of your services fall under it. |
+| **PDPC drafts and new frameworks (2026)** | Draft DSAR criteria (public hearing April 2026), draft ROPA guidance, and the certification framework published June 2026 — may change documentation expectations. |
+
+---
+
+## 17. References
+
+**Primary / official**
+
+- พ.ร.บ. ว่าด้วยการกระทำความผิดเกี่ยวกับคอมพิวเตอร์ พ.ศ. 2550 และ (ฉบับที่ 2) พ.ศ. 2560 — Royal Gazette (ราชกิจจานุเบกษา)
+- ประกาศกระทรวงดิจิทัลเพื่อเศรษฐกิจและสังคม เรื่อง หลักเกณฑ์การเก็บรักษาข้อมูลจราจรทางคอมพิวเตอร์ของผู้ให้บริการ พ.ศ. 2564 — copy: <https://citcoms.office.nu.ac.th/wp-content/uploads/2022/09/T_0009.pdf>
+- พ.ร.บ. คุ้มครองข้อมูลส่วนบุคคล พ.ศ. 2562 — Royal Gazette; PDPC: <https://www.pdpc.or.th>
+- ประกาศคณะกรรมการคุ้มครองข้อมูลส่วนบุคคล เรื่อง มาตรการรักษาความมั่นคงปลอดภัยของผู้ควบคุมข้อมูลส่วนบุคคล พ.ศ. 2565
+- ประกาศคณะกรรมการคุ้มครองข้อมูลส่วนบุคคล เรื่อง หลักเกณฑ์และวิธีการในการแจ้งเหตุการละเมิดข้อมูลส่วนบุคคล พ.ศ. 2565
+- NIMT time and frequency (UTC(NIMT)): <https://www.nimt.or.th/main/?p=33340>
+
+**Secondary / commentary used in this guideline**
+
+- iLaw — summary of MDES 2564 notification: <https://www.ilaw.or.th/articles/4832>
+- Ministry of Education slide on CCA (No. 2) 2560 — s.26 retention 90 days to 2 years: <https://www.moe.go.th/backend/wp-content/uploads/2020/08/present-slide.pdf>
+- DFDL — PDPA subordinate laws (Security Measures Notification conditions): <https://www.dfdl.com/insights/legal-and-tax-updates/thailands-personal-data-protection-act-pdpa-subordinate-laws>
+- KPMG Thailand — PDPA penalties: <https://kpmg.com/th/en/home/insights/2022/06/legal-news-flash-issue-14.html>
+- Herbert Smith Freehills Kramer — PDPC breach notification notification (Dec 2022): <https://www.hsfkramer.com/en_US/notes/data/2022-12/pdpa-update-thailands-new-legislation-on-personal-data-breach-notification>
+- DFDL — first PDPC fine: 37(1) and 37(4) under s.83 (3M each): <https://www.dfdl.com/?p=60800>
+- Tilleke & Gibbins — PDPC enforcement, eight fines (Aug 2025): <https://www.tilleke.com/insights/more-than-a-warning-eight-serious-fines-imposed-in-thai-data-protection-cases>
+- "Thailand ramps up data protection enforcement" (case list incl. private hospital): <https://www.hlc.com/en/publications/thailand-ramps-up-data-protection-enforcement>
+- Tilleke & Gibbins — PDPC AI guidelines (2026): <https://www.tilleke.com/insights/thailand-issues-personal-data-protection-guidelines-for-ai-systems>
+- NIMT NTP servers (time1–5.nimt.or.th), UNOOSA GNSS 2024 presentation: <https://www.unoosa.org/documents/pdf/psa/activities/2024/GNSS2024/GNSS2024_09_04.pdf>
+
+---
+
+## Appendix A — Thai/English glossary
+
+| ภาษาไทย | English |
+|---|---|
+| ข้อมูลจราจรทางคอมพิวเตอร์ | Computer traffic data |
+| ผู้ให้บริการ | Service provider |
+| ผู้ใช้บริการ | Service user |
+| พนักงานเจ้าหน้าที่ | Competent official |
+| การพิสูจน์และยืนยันตัวตนทางดิจิทัล | Digital identity proofing and authentication |
+| ผู้ควบคุมข้อมูลส่วนบุคคล | Data controller |
+| ผู้ประมวลผลข้อมูลส่วนบุคคล | Data processor |
+| เจ้าของข้อมูลส่วนบุคคล | Data subject |
+| ข้อมูลส่วนบุคคลที่มีความอ่อนไหว | Sensitive personal data |
+| บันทึกรายการกิจกรรมการประมวลผล (ROPA) | Record of processing activities |
+| เจ้าหน้าที่คุ้มครองข้อมูลส่วนบุคคล (DPO) | Data protection officer |
+| การตรวจสอบย้อนหลัง | Audit trail |
+| เหตุการละเมิดข้อมูลส่วนบุคคล | Personal data breach |
+| ฐานประโยชน์โดยชอบด้วยกฎหมาย | Legitimate interest (s.24(5)) |
+| ฐานการปฏิบัติตามกฎหมาย | Legal obligation (s.24(6)) |

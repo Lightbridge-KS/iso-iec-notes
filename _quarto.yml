@@ -41,6 +41,8 @@ book:
           href: "contents/logging/samd-logging-medlog-guidebook.qmd"
         - text: Log Retention for SaMD
           href: "contents/logging/log-retention-for-samd.qmd"
+        - text: "Logging Guideline: Thai PDPA and CCA"
+          href: "contents/logging/logging-guideline-pdpa-cca.qmd"
     # - part: ISO 13485
     #   chapters:
     #     - text: What 13485 Is
